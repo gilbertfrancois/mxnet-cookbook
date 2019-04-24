@@ -18,6 +18,7 @@ NUM_OUTPUTS = 1
 NUM_EPOCHS = 10
 BATCH_SIZE = 4
 
+
 # %%
 # -- Create some data to train on
 
@@ -29,6 +30,7 @@ def get_y(X):
     y = 2 * X[:, 0] - 3.4 * X[:, 1] + 4.2
     noise = 0.01 * nd.random.normal(shape=(len(X),))
     return y + noise
+
 
 # %%
 # -- Split train / eval data
@@ -48,10 +50,10 @@ train_data = gluon.data.DataLoader(gluon.data.ArrayDataset(X_train, y_train), ba
 eval_data = gluon.data.DataLoader(gluon.data.ArrayDataset(X_eval, y_eval), batch_size=BATCH_SIZE, shuffle=False)
 test_data = gluon.data.DataLoader(gluon.data.ArrayDataset(X_test), batch_size=BATCH_SIZE, shuffle=False)
 
-
 # %%
 # -- Define model
 
+# layer 1
 net = gluon.nn.Dense(1)
 
 # %%
@@ -91,6 +93,7 @@ print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
 
 plt.plot(np.log10(loss_sequence))
 plt.show()
+
 # %%
 
 y_pred = net(X_test)
@@ -100,7 +103,6 @@ ax = fig.add_subplot(111, projection='3d')
 ax.scatter(X_test[:, 0].asnumpy(), X_test[:, 1].asnumpy(), y_pred.asnumpy())
 fig.show()
 
-
 # %%
 # -- Take a peak into the trained weights and bias
 
@@ -109,4 +111,3 @@ print("Params type is: {}".format(type(params)))
 
 for param in params.values():
     print(param.name, param.data())
-

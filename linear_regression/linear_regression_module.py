@@ -50,9 +50,10 @@ test_iter = mx.io.NDArrayIter(X_test, None, BATCH_SIZE)
 # -- Define the model
 #    Note that the loss function is implicitly given by the layer "LinearRegressionOutput"
 
+# placeholders for input and output data
 data = mx.sym.Variable('data')
 label = mx.sym.Variable('lin_reg_label')
-
+# layer 1
 net = mx.sym.FullyConnected(data, num_hidden=1, name='fc1')
 net = mx.sym.LinearRegressionOutput(net, label=label, name='lro')
 
@@ -70,7 +71,8 @@ model.fit(train_iter, eval_iter,
           num_epoch=NUM_EPOCHS,
           eval_metric='mse',
           force_init=True,
-          batch_end_callback=mx.callback.Speedometer(len(X_train) // BATCH_SIZE))
+          batch_end_callback=mx.callback.Speedometer(BATCH_SIZE)
+          )
 
 print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
 
@@ -90,3 +92,28 @@ fig.show()
 # -- Take a peak into the trained weights and bias
 
 model.get_params()
+
+
+# %%
+# -- Low level training (alternative to high level fit() function, does not work well yet.)
+#
+#
+# t0 = time.time()
+#
+# # model = mx.mod.Module(symbol=net, data_names=['data'], label_names=['lin_reg_label'])
+# model.bind(data_shapes=train_iter.provide_data,
+#          label_shapes=train_iter.provide_label)
+# model.init_params(initializer=mx.init.Xavier(magnitude=2))
+# model.init_optimizer(optimizer='sgd', optimizer_params={'learning_rate': 0.001, 'momentum': 0.9})
+# metric = mx.metric.create("mse")
+#
+# #%%
+# for epoch in range(NUM_EPOCHS):
+#     for batch in train_iter:
+#         res = model.forward(batch, is_train=True)
+#         loss = model.update_metric(metric, batch.label)
+#         print(res)
+#         model.backward()
+#     model.update()
+#
+# print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
