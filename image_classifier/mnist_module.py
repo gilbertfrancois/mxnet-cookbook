@@ -116,5 +116,12 @@ model.fit(train_iter, eval_iter,
 print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
 
 # %%
-model.save_checkpoint("fashion_mnist_module", EPOCHS)
+# -- Save parameters only
+
 model.save_params("fashion_mnist_module.params")
+
+
+# %%
+# -- Save model definition and parameters
+
+model.save_checkpoint("fashion_mnist_module", EPOCHS)
