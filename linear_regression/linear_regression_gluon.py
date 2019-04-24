@@ -44,7 +44,7 @@ y_eval = get_y(X_eval)
 X_test = get_x(1000, NUM_INPUTS)
 
 # %%
-# Create a data loader that feeds batches
+# -- Create a data loader that feeds batches
 
 train_data = gluon.data.DataLoader(gluon.data.ArrayDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=True)
 eval_data = gluon.data.DataLoader(gluon.data.ArrayDataset(X_eval, y_eval), batch_size=BATCH_SIZE, shuffle=False)
@@ -90,11 +90,13 @@ for epoch in range(NUM_EPOCHS):
 print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
 
 # %%
+# -- Plot training loss on a log scale
 
 plt.plot(np.log10(loss_sequence))
 plt.show()
 
 # %%
+# -- Predict y for the test data and plot the result as a point cloud
 
 y_pred = net(X_test)
 

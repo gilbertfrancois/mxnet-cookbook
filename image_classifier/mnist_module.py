@@ -57,7 +57,7 @@ X_train = normalize(X_train, 0.286, 0.353)
 X_eval = normalize(X_eval, 0.286, 0.353)
 
 # %%
-# Create a data iterator that feeds batches
+# -- Create a data iterator that feeds batches
 
 train_iter = mx.io.NDArrayIter(X_train, y_train, batch_size=BATCH_SIZE, shuffle=True,  label_name="softmax_label")
 eval_iter  = mx.io.NDArrayIter(X_eval,  y_eval,  batch_size=BATCH_SIZE, shuffle=False, label_name="softmax_label")

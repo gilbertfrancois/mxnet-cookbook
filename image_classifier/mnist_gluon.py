@@ -1,9 +1,7 @@
 import logging
 import time
 
-import matplotlib.pyplot as plt
 import mxnet as mx
-import numpy as np
 from mxnet import gluon, init, autograd
 from mxnet.gluon.data.vision import transforms
 from mxnet.gluon.nn import BatchNorm
@@ -41,7 +39,7 @@ transformer = transforms.Compose([
 ])
 
 # %%
-# Create a data iterator that feeds batches
+# -- Create a data iterator that feeds batches
 
 train_data = gluon.data.DataLoader(mnist_train.transform_first(transformer),
                                    batch_size=BATCH_SIZE,
@@ -95,6 +93,7 @@ trainer = gluon.Trainer(net.collect_params(), 'Adam', {'learning_rate': 0.001})
 
 
 # %%%
+# -- Custom metric function
 
 def acc(output, label):
     return (output.argmax(axis=1) == label.astype('float32')).mean().asscalar()
@@ -133,5 +132,6 @@ print("Elapsed time {:02f} seconds".format(time.time() - t0))
 
 
 # %%
+# -- Save parameters
+
 net.save_parameters('fashion_mnist_gluon.params')
-# %%

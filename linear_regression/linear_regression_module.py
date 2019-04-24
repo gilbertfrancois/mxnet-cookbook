@@ -7,6 +7,7 @@ from mxnet import nd
 from mpl_toolkits.mplot3d import Axes3D
 
 logging.getLogger().setLevel(logging.DEBUG)
+
 # %%
 # -- Constants
 
@@ -28,6 +29,7 @@ def get_y(X):
     noise = 0.01 * nd.random.normal(shape=(len(X),))
     return y + noise
 
+
 # %%
 # -- Split train / eval data
 
@@ -40,7 +42,7 @@ y_eval = get_y(X_eval)
 X_test = get_x(1000, NUM_INPUTS)
 
 # %%
-# Create a data loader that feeds batches
+# -- Create a data loader that feeds batches
 
 train_iter = mx.io.NDArrayIter(X_train, y_train, BATCH_SIZE, shuffle=True, label_name='lin_reg_label')
 eval_iter = mx.io.NDArrayIter(X_eval, y_eval, BATCH_SIZE, shuffle=False, label_name='lin_reg_label')
@@ -77,11 +79,9 @@ model.fit(train_iter, eval_iter,
 print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
 
 # %%
-# -- Plot the predictions
+# -- Predict y for the test data and plot the result as a point cloud
 
 y_pred = model.predict(test_iter)
-
-#%%
 
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -92,7 +92,6 @@ fig.show()
 # -- Take a peak into the trained weights and bias
 
 model.get_params()
-
 
 # %%
 # -- Low level training (alternative to high level fit() function, does not work well yet.)
