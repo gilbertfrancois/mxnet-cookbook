@@ -6,7 +6,7 @@ verify_ssl = true
 [dev-packages]
 
 [packages]
-mxnet-mkl = "*"
+mxnet = "==1.4.0"
 matplotlib = "*"
 ipython = "*"
 
