@@ -8,7 +8,9 @@ programming with Gluon and symbolic programming with Module.
 
 ## Linear Regression
 
-Code comparison between Module and Gluon for a simple linear regression problem.
+Code comparison between Module and Gluon for a simple linear regression problem. There are 2 versions for the *Module*
+API. The file `linear_regression_module.py` uses the high-level `fit()` function. The file `linear_regression_module_intermediate.py`
+does the steps of `fit()` more verbose. 
 
 ## Image Classifier
 

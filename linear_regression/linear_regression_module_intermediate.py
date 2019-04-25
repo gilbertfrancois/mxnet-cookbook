@@ -77,20 +77,32 @@ model = mx.mod.Module(symbol=net, data_names=['data'], label_names=['lin_reg_lab
 
 # %%
 # -- Train
-#    Note that the optimizer is given as parameter in the fit() function as an argument.
+#    Intermediate level training (alternative to high level fit() function).
 
+log = []
+
+model.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label, for_training=True)
+model.init_params(initializer=mx.init.Xavier(magnitude=2), force_init=True)
+model.init_optimizer(optimizer="sgd", optimizer_params={'learning_rate': 0.001, 'momentum': 0.9}, )
+metric = mx.metric.MSE()
 t0 = time.time()
 
-model.fit(train_iter, eval_iter,
-          optimizer='sgd',
-          optimizer_params={'learning_rate': 0.001, 'momentum': 0.9},
-          num_epoch=NUM_EPOCHS,
-          eval_metric='mse',
-          force_init=True,
-          batch_end_callback=mx.callback.Speedometer(BATCH_SIZE)
-          )
+for epoch in range(NUM_EPOCHS):
+    tic = time.time()
+    train_iter.reset()
+    metric.reset()
+    for batch in train_iter:
+        model.forward(batch, is_train=True)
+        model.update_metric(metric, batch.label)
+        model.backward()
+        model.update()
+        log.append(metric.get())
+    toc = time.time()
+    name, val = metric.get_name_value()[0]
+    print("Epoch: {:05d}, Chrono: {:0.3f}, Train-{}: {:e}".format(epoch, (toc-tic), name, val))
 
-print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
+print("Elapsed time: {:0.3f} seconds".format(time.time() - t0))
+
 
 # %%
 # -- Predict y for the test data and plot the result as a point cloud
@@ -105,36 +117,12 @@ fig.show()
 # %%
 # -- Take a peak into the trained weights and bias
 
-model.get_params()
-
-
-
-
+print(model.get_params())
 
 # %%
-# -- Intermediate level training (alternative to high level fit() function, does not work well yet.)
-#
+# -- Plot loss
 
-log_acc = []
-log_mse = []
-
-model = mx.mod.Module(symbol=net, data_names=["data"], label_names=["lin_reg_label"])
-model.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label)
-model.init_params(initializer=mx.init.Xavier(magnitude=2), force_init=True)
-model.init_optimizer(optimizer="sgd", optimizer_params={'learning_rate': 0.001, 'momentum': 0.9}, )
-metric = mx.metric.MSE()
-
-t0 = time.time()
-
-for epoch in range(NUM_EPOCHS):
-    train_iter.reset()
-    metric.reset()
-    for batch in train_iter:
-        model.forward(batch, is_train=True)
-        model.update_metric(metric, batch.label)
-        model.backward()
-        model.update()
-        log_acc.append(metric.get())
-    print("Epoch {:05d}, Training {}".format(epoch, metric.get()))
-
-print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
+l2_loss = [item[1] for item in log]
+plt.figure()
+plt.plot(l2_loss)
+plt.show()
