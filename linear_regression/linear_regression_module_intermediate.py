@@ -85,6 +85,7 @@ model.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_
 model.init_params(initializer=mx.init.Xavier(magnitude=2), force_init=True)
 model.init_optimizer(optimizer="sgd", optimizer_params={'learning_rate': 0.001, 'momentum': 0.9}, )
 metric = mx.metric.MSE()
+
 t0 = time.time()
 
 for epoch in range(NUM_EPOCHS):
@@ -99,10 +100,9 @@ for epoch in range(NUM_EPOCHS):
         log.append(metric.get())
     toc = time.time()
     name, val = metric.get_name_value()[0]
-    print("Epoch: {:05d}, Chrono: {:0.3f}, Train-{}: {:e}".format(epoch, (toc-tic), name, val))
+    print("Epoch: {:05d}, Chrono: {:0.3f}, Train-{}: {:e}".format(epoch, (toc - tic), name, val))
 
 print("Elapsed time: {:0.3f} seconds".format(time.time() - t0))
-
 
 # %%
 # -- Predict y for the test data and plot the result as a point cloud
