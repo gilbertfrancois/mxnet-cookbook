@@ -105,36 +105,4 @@ fig.show()
 # %%
 # -- Take a peak into the trained weights and bias
 
-model.get_params()
-
-
-
-
-
-# %%
-# -- Intermediate level training (alternative to high level fit() function, does not work well yet.)
-#
-
-log_acc = []
-log_mse = []
-
-model = mx.mod.Module(symbol=net, data_names=["data"], label_names=["lin_reg_label"])
-model.bind(data_shapes=train_iter.provide_data, label_shapes=train_iter.provide_label)
-model.init_params(initializer=mx.init.Xavier(magnitude=2), force_init=True)
-model.init_optimizer(optimizer="sgd", optimizer_params={'learning_rate': 0.001, 'momentum': 0.9}, )
-metric = mx.metric.MSE()
-
-t0 = time.time()
-
-for epoch in range(NUM_EPOCHS):
-    train_iter.reset()
-    metric.reset()
-    for batch in train_iter:
-        model.forward(batch, is_train=True)
-        model.update_metric(metric, batch.label)
-        model.backward()
-        model.update()
-        log_acc.append(metric.get())
-    print("Epoch {:05d}, Training {}".format(epoch, metric.get()))
-
-print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
+print(model.get_params())
