@@ -42,7 +42,22 @@ _Gluon_
 
 ```
 
+## Save after every epoch
 
+_Module_
+```python
+# construct a callback function to save checkpoints
+model_prefix = 'mymodel'
+checkpoint = mx.callback.do_checkpoint(model_prefix)
+
+mod = mx.mod.Module(symbol=net)
+mod.fit(train_iter, num_epoch=5, epoch_end_callback=checkpoint)
+```
+
+_Gluon_
+```python
+
+```
 
 ## Data
 ### Data
