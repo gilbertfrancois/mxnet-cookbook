@@ -59,11 +59,33 @@ _Gluon_
 
 ```
 
+## Get all layers after loading
+
+_Module_
+
+```python
+sym, arg_params, aux_params = mx.model.load_checkpoint(model_path, epoch=epoch)
+all_layers = sym.get_internals()
+sym = all_layers['fc1_output']
+model = mx.mod.Module(symbol=sym, context=ctx, label_names=None)
+model.bind(for_training=False, data_shapes=[('data', (1, 3, self.image_size, self.image_size))])
+model.set_params(arg_params, aux_params)
+```
+
+
+
+
+
+
+
 ## Data
 ### Data
-Combine the features and labels of the training data
+Combine data and labels in a Dataset object
 ```python
-dataset = mxnet.gluon.data.ArrayDataset(features, labels)
+mx.random.seed(42) # Fix the seed for reproducibility
+X = mx.random.uniform(shape=(10, 3))
+y = mx.random.uniform(shape=(10, 1))
+dataset = mxnet.gluon.data.ArrayDataset(X, y)
 ```
 Randomly reading mini-batches
 ```python
