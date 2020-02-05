@@ -27,3 +27,7 @@ Shows how to implement a custom loss function and custom metrics function.
     the list of network outputs.
     - CustomMetric expects float values, not symbols. The function needs to be written with numpy arrays.
     
+## DCGAN
+
+This consists of a simple Deep Convolutional Generative Adversarial Network (dcgan), implemented in Gluon. As
+training data, it uses the aligned images of the Labeled Faces in the Wild dataset.
