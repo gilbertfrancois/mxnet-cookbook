@@ -314,3 +314,6 @@ tags
 [._]*.un~
 
 Pipfile.lock
+data/
+output/
+
