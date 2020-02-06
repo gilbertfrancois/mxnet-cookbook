@@ -36,8 +36,8 @@ POOL_SIZE = 50
 
 dataset = "facades"
 
-train_image_path = f"./data/train/{dataset}"
-val_image_path = f"./data/val/{dataset}"
+train_image_path = f"./{dataset}/train"
+val_image_path = f"./{dataset}/val"
 
 
 def download_data(dataset):
@@ -59,5 +59,110 @@ def load_data(path, batch_size, is_reversed=False):
             if not fname.endswith(".jpg"):
                 continue
             img = os.path.join(path, fname)
-            img_arr  = mx.image.imread(img).astype(np.float32) / 127.5 - 1
+            img_arr = mx.image.imread(img).astype(np.float32) / 127.5 - 1
             img_arr = mx.image.imresize(img_arr, INPUT_SHAPE[1] * 2, INPUT_SHAPE[0])
+            # Crop input and output images
+            img_arr_in = mx.image.fixed_crop(img_arr, 0, 0, INPUT_SHAPE[1], INPUT_SHAPE[0])
+            img_arr_in = nd.transpose(img_arr_in, (2, 0, 1))
+            img_arr_in = img_arr_in.reshape((1, ) + img_arr_in.shape)
+            img_arr_out = mx.image.fixed_crop(img_arr, INPUT_SHAPE[1], 0, INPUT_SHAPE[1], INPUT_SHAPE[0])
+            img_arr_out = nd.transpose(img_arr_out, (2, 0, 1))
+            img_arr_out = img_arr_out.reshape((1, ) + img_arr_out.shape)
+            img_in_list.append(img_arr_out if is_reversed else img_arr_in)
+            img_out_list.append(img_arr_in if is_reversed else img_arr_out)
+
+    res = mx.io.NDArrayIter(data=[nd.concat(*img_in_list, dim=0),
+                                  nd.concat(*img_out_list, dim=0)],
+                            batch_size=batch_size)
+    return res
+
+
+download_data(dataset)
+train_data = load_data(train_image_path, BATCH_SIZE, is_reversed=True)
+val_data = load_data(val_image_path, BATCH_SIZE, is_reversed=True)
+
+
+def visualize(img_arr):
+    plt.imshow(((img_arr.asnumpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8))
+    plt.axis('off')
+
+
+def preview_train_data():
+    img_in_list, img_out_list = train_data.next().data
+    for i in range(4):
+        plt.subplot(2, 4, i + 1)
+        visualize(img_in_list[i])
+        plt.subplot(2, 4, i + 5)
+        visualize(img_out_list[i])
+    plt.show()
+
+
+preview_train_data()
+
+
+class UnetSkipUnit(HybridBlock):
+    def __init__(self,
+                 inner_channels,
+                 outer_channels,
+                 inner_block=None,
+                 innermost=False,
+                 outermost=False,
+                 use_dropout=False,
+                 use_bias=False):
+        super(UnetSkipUnit, self).__init__()
+
+        with self.name_scope():
+            self.outermost = outermost
+            en_conv = Conv2D(channels=inner_channels,
+                             kernel_size=4,
+                             strides=2,
+                             padding=1,
+                             in_channels=outer_channels,
+                             use_bias=use_bias)
+            en_relu = LeakyReLU(alpha=0.2)
+            en_norm = BatchNorm(momentum=0.1, in_channels=inner_channels)
+            de_relu = Activation(activation="relu")
+            de_norm = BatchNorm(momentum=0.1, in_channels=outer_channels)
+
+            if innermost:
+                de_conv = Conv2DTranspose(channels=outer_channels,
+                                          kernel_size=4,
+                                          strides=2,
+                                          padding=1,
+                                          in_channels=outer_channels,
+                                          use_bias=use_bias)
+                encoder = [en_relu, en_conv]
+                decoder = [de_relu, de_conv, de_norm]
+                model = encoder + decoder
+            elif outermost:
+                de_conv = Conv2DTranspose(channels=outer_channels,
+                                          kernel_size=4,
+                                          strides=2,
+                                          padding=1,
+                                          in_channels=inner_channels * 2)
+                encoder = [en_conv]
+                decoder = [de_relu, de_conv, Activation(activation="tanh")]
+                model = encoder + [inner_block] + decoder
+            else:
+                de_conv = Conv2DTranspose(channels=outer_channels,
+                                          kernels_size=4,
+                                          strides=2,
+                                          padding=1,
+                                          in_channels=inner_channels * 2,
+                                          use_bias=use_bias)
+                encoder = [en_relu, en_conv, en_norm]
+                decoder = [de_relu, de_conv, de_norm]
+                model = encoder + [inner_block] + decoder
+            if use_dropout:
+                model += [Dropout(rate=0.5)]
+
+            self.model = HybridSequential()
+            with self.model.name_scope():
+                for block in model:
+                    self.model.add(block)
+
+    def hybrid_forward(self, F, x):
+        if self.outermost:
+            return self.model(x)
+        else:
+            return F.concat(self.model(x), x, dim=1)
