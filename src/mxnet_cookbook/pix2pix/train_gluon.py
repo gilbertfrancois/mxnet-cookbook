@@ -145,7 +145,7 @@ class UnetSkipUnit(HybridBlock):
                 model = encoder + [inner_block] + decoder
             else:
                 de_conv = Conv2DTranspose(channels=outer_channels,
-                                          kernels_size=4,
+                                          kernel_size=4,
                                           strides=2,
                                           padding=1,
                                           in_channels=inner_channels * 2,
@@ -166,3 +166,27 @@ class UnetSkipUnit(HybridBlock):
             return self.model(x)
         else:
             return F.concat(self.model(x), x, dim=1)
+
+
+class UnetGenerator(HybridBlock):
+    def __init__(self, in_channels, num_downs, ngf=64, use_dropout=True):
+        super().__init__()
+        unet = UnetSkipUnit(ngf * 8, ngf * 8, innermost=True)
+        for _ in range(num_downs - 5):
+            unet = UnetSkipUnit(ngf * 8, ngf * 8, unet, use_dropout=use_dropout)
+        unet = UnetSkipUnit(ngf * 8, ngf * 4, unet, use_dropout=use_dropout)
+        unet = UnetSkipUnit(ngf * 4, ngf * 2, unet, use_dropout=use_dropout)
+        unet = UnetSkipUnit(ngf * 2, ngf * 1, unet, use_dropout=use_dropout)
+        unet = UnetSkipUnit(ngf, in_channels, unet, outermost=True)
+
+        with self.name_scope():
+            self.model = unet
+
+    def hybrid_forward(self, F, x):
+        return self.model(x)
+
+
+import pdb; pdb.set_trace()
+netG = UnetGenerator(in_channels=3, num_downs=8)
+print("hello")
+
