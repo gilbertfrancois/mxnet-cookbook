@@ -21,24 +21,6 @@ from mxnet.gluon.nn import HybridSequential
 from mxnet.gluon.nn import HybridBlock
 from mxnet.gluon.nn import LeakyReLU
 
-# Set the compute context, GPU is available otherwise CPU
-mx_ctx = mx.gpu() if mx.test_utils.list_gpus() else mx.cpu()
-
-# %%
-# --  settings
-INPUT_SHAPE = (256, 256, 3)
-EPOCHS = 100
-BATCH_SIZE = 10
-LR = 0.0002
-BETA1 = 0.5
-LAMBDA1 = 100
-POOL_SIZE = 50
-
-dataset = "facades"
-
-train_image_path = f"./{dataset}/train"
-val_image_path = f"./{dataset}/val"
-
 
 def download_data(dataset):
     if os.path.exists(dataset):
@@ -51,7 +33,7 @@ def download_data(dataset):
     os.remove(data_file)
 
 
-def load_data(path, batch_size, is_reversed=False):
+def load_data(path, batch_size, INPUT_SHAPE, is_reversed=False):
     img_in_list = []
     img_out_list = []
     for path, _, fnames in os.walk(path):
@@ -64,10 +46,10 @@ def load_data(path, batch_size, is_reversed=False):
             # Crop input and output images
             img_arr_in = mx.image.fixed_crop(img_arr, 0, 0, INPUT_SHAPE[1], INPUT_SHAPE[0])
             img_arr_in = nd.transpose(img_arr_in, (2, 0, 1))
-            img_arr_in = img_arr_in.reshape((1, ) + img_arr_in.shape)
+            img_arr_in = img_arr_in.reshape((1,) + img_arr_in.shape)
             img_arr_out = mx.image.fixed_crop(img_arr, INPUT_SHAPE[1], 0, INPUT_SHAPE[1], INPUT_SHAPE[0])
             img_arr_out = nd.transpose(img_arr_out, (2, 0, 1))
-            img_arr_out = img_arr_out.reshape((1, ) + img_arr_out.shape)
+            img_arr_out = img_arr_out.reshape((1,) + img_arr_out.shape)
             img_in_list.append(img_arr_out if is_reversed else img_arr_in)
             img_out_list.append(img_arr_in if is_reversed else img_arr_out)
 
@@ -77,17 +59,12 @@ def load_data(path, batch_size, is_reversed=False):
     return res
 
 
-download_data(dataset)
-train_data = load_data(train_image_path, BATCH_SIZE, is_reversed=True)
-val_data = load_data(val_image_path, BATCH_SIZE, is_reversed=True)
-
-
 def visualize(img_arr):
     plt.imshow(((img_arr.asnumpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8))
     plt.axis('off')
 
 
-def preview_train_data():
+def preview_train_data(train_data):
     img_in_list, img_out_list = train_data.next().data
     for i in range(4):
         plt.subplot(2, 4, i + 1)
@@ -95,9 +72,6 @@ def preview_train_data():
         plt.subplot(2, 4, i + 5)
         visualize(img_out_list[i])
     plt.show()
-
-
-preview_train_data()
 
 
 class UnetSkipUnit(HybridBlock):
@@ -186,7 +160,33 @@ class UnetGenerator(HybridBlock):
         return self.model(x)
 
 
-import pdb; pdb.set_trace()
-netG = UnetGenerator(in_channels=3, num_downs=8)
-print("hello")
+def main():
+    # Set the compute context, GPU is available otherwise CPU
+    mx_ctx = mx.gpu() if mx.test_utils.list_gpus() else mx.cpu()
 
+    # %%
+    # --  settings
+    INPUT_SHAPE = (256, 256, 3)
+    EPOCHS = 100
+    BATCH_SIZE = 10
+    LR = 0.0002
+    BETA1 = 0.5
+    LAMBDA1 = 100
+    POOL_SIZE = 50
+
+    dataset = "facades"
+
+    train_image_path = f"./{dataset}/train"
+    val_image_path = f"./{dataset}/val"
+
+    download_data(dataset)
+    train_data = load_data(train_image_path, BATCH_SIZE, INPUT_SHAPE, is_reversed=True)
+    val_data = load_data(val_image_path, BATCH_SIZE, INPUT_SHAPE, is_reversed=True)
+
+    preview_train_data(train_data)
+
+    netG = UnetGenerator(in_channels=3, num_downs=8)
+
+
+if __name__ == '__main__':
+    main()
