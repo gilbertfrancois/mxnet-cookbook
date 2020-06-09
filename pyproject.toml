@@ -6,8 +6,9 @@ authors = ["Gilbert Francois Duivesteijn <gilbert@deep-impact.ch>"]
 
 [tool.poetry.dependencies]
 python = "^3.7"
-mxnet = "^1.5.1"
+mxnet = "^1.6.0"
 matplotlib = "^3.1.3"
+gluoncv = "^0.7.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
