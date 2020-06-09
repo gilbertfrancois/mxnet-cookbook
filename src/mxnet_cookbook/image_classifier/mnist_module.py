@@ -114,6 +114,10 @@ net = mx.sym.SoftmaxOutput(net, label=label, name="softmax")
 model = mx.mod.Module(symbol=net, data_names=['data'], label_names=['softmax_label'], context=mx_ctx)
 
 # %%
+# -- Print summary
+mx.viz.print_summary(net, shape={'data': train_iter.provide_data[0].shape})
+
+# %%
 # -- Train
 #    Note that the optimizer is given as parameter in the fit() function as an argument.
 
