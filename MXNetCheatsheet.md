@@ -72,8 +72,16 @@ model.bind(for_training=False, data_shapes=[('data', (1, 3, self.image_size, sel
 model.set_params(arg_params, aux_params)
 ```
 
+_Gluon_
 
-
+```python
+net = gluoncv.model_zoo.get_model("ResNet50V2", pretrained=True)
+all_params = net.collect_params()
+print(net)
+# Get one layer by using the index name/number from the output above
+W1 = net.features[6][0].conv1.weight.data()  # returns NDArray
+W1params = all_params.get("resnetv20_stage2_conv1_weight")  # Params from same layer as above.
+```
 
 
 
@@ -100,3 +108,27 @@ Converts an image NDArray of shape $(H \times W \times C)$ in the range $[0, 255
 ```python
 transformer = mxnet.gluon.data.vision.transform.ToTensor()
 ```
+
+## Transfer learning
+### Freeze parameters of layers (Gluon)
+
+You can set grad_req attribute to 'null' (it is a string) to prevent changes of this parameter. Here is the example. I define a set of parameter names I want to freeze and freeze them after creating my model, but before the initialization.
+
+```python
+num_hidden = 10
+net = gluon.nn.Sequential()
+with net.name_scope():
+    net.add(gluon.nn.Dense(num_hidden, activation="relu"))
+    net.add(gluon.nn.Dense(num_hidden, activation="relu"))
+    net.add(gluon.nn.Dense(num_outputs))
+
+layers_to_freeze = set(['sequential1_dense0_weight', 'sequential1_dense0_bias', 'sequential1_dense1_weight', 'sequential1_dense1_bias'])    
+
+for p in net.collect_params().values():
+    if p.name in layers_to_freeze:
+        p.grad_req = 'null'
+
+net.collect_params().initialize(mx.init.Xavier(magnitude=2.24), ctx=ctx)
+```
+
+https://discuss.mxnet.io/t/gluon-access-layer-weights/1160/2
