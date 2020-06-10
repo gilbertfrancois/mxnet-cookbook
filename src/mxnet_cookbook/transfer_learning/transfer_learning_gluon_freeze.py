@@ -15,14 +15,15 @@
 import datetime
 import os
 import pickle as pkl
-import time
 import pprint
+import time
 
 import mxnet as mx
+import matplotlib.pyplot as plt
 from gluoncv import model_zoo
 from mxnet import autograd
 from mxnet import gluon
-from mxnet import init, nd
+from mxnet import nd
 from mxnet.gluon import nn
 from mxnet.gluon.data.vision import transforms
 
@@ -32,11 +33,11 @@ from mxnet.gluon.data.vision import transforms
 timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
 classes = 23
 epochs = 1000
-per_device_batch_size = 48
+per_device_batch_size = 64
 momentum = 0.9
 wd = 0.0001
 
-num_gpus = 0
+num_gpus = 2
 num_workers = 32
 ctx = [mx.gpu(i) for i in range(num_gpus)] if num_gpus > 0 else [mx.cpu()]
 batch_size = per_device_batch_size * max(num_gpus, 1)
@@ -69,7 +70,8 @@ transform_test = transforms.Compose([
 # %%
 # -- Data loaders
 
-data_folder = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "minc-2500")
+# data_folder = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "minc-2500")
+data_folder = "/home/gilbert/Development/git/mxnet-cookbook/data/minc-2500"
 # data_folder = "/Users/gilbert/Development/git/mxnet-cookbook/data/minc-2500"
 train_data_folder = os.path.join(data_folder, "train")
 val_data_folder = os.path.join(data_folder, "val")
@@ -100,13 +102,30 @@ test_data = gluon.data.DataLoader(
 # -- Model and Trainer
 
 x = nd.random.randn(1, 3, 224, 224)
-net = model_zoo.get_model(pretrained_model_name, pretrained=True)
+pretrained_net = model_zoo.get_model(pretrained_model_name, pretrained=True)
+net = nn.HybridSequential()
+
+with net.name_scope():
+    pretrained_features = pretrained_net.features
+    # Freeze pretrained layers
+    for param in pretrained_features.collect_params().values():
+        param.grad_req = 'null'
+    # Create new layers for the tail
+    new_tail = nn.HybridSequential()
+    new_tail.add(
+        nn.Dense(1024),
+        nn.Dropout(0.2),
+        nn.Dense(512),
+        nn.Dense(classes)
+    )
+    new_tail.initialize(init=mx.init.Xavier(), ctx=ctx)
+    # Create new net for transfer learning
+    net.add(pretrained_features)
+    net.add(new_tail)
 
 # %%
 #
-with net.name_scope():
-    net.output = nn.Dense(classes)
-net.output.initialize(init.Xavier(), ctx=ctx)
+
 net.collect_params().reset_ctx(ctx)
 x = x.as_in_context(ctx[0])
 net.summary(x)
@@ -115,9 +134,9 @@ net.hybridize()
 # %%
 # --
 
-scheduler = mx.lr_scheduler.FactorScheduler(base_lr=0.001, factor=0.333, step=10*len(train_data), stop_factor_lr=1e-8)
-# trainer = gluon.Trainer(net.collect_params(), "sgd", {"lr_scheduler": scheduler, "momentum": momentum, "wd": wd})
-trainer = gluon.Trainer(net.collect_params(), "adam", {"lr_scheduler": scheduler})
+scheduler = mx.lr_scheduler.FactorScheduler(base_lr=0.001, factor=0.75, step=8*len(train_data), stop_factor_lr=1e-8)
+trainer = gluon.Trainer(net.collect_params(), "sgd", {"lr_scheduler": scheduler, "momentum": momentum, "wd": wd})
+# trainer = gluon.Trainer(net.collect_params(), "adam", {"lr_scheduler": scheduler})
 loss_fn = gluon.loss.SoftmaxCrossEntropyLoss()
 metric = mx.metric.Accuracy()
 
@@ -138,6 +157,15 @@ def test(net_, val_data_, ctx_):
     _, val_acc = _metric.get()
     return val_acc, val_loss
 
+# %%
+# -- Plot history
+
+def plot_history(data, model_name):
+    plt.figure()
+    plt.plot(data["train_acc"], label="train_acc")
+    plt.plot(data["val_acc"], label="val_acc")
+    plt.savefig(f"{model_name}.png")
+    plt.close()
 
 # %%
 # -- Training Loop
@@ -157,6 +185,7 @@ for epoch in range(epochs):
     metric.reset()
     # Start training loop
     for i, batch in enumerate(train_data):
+        tic_batch = time.time()
         # Splits an NDArray into len(ctx_list) slices along batch_axis and loads each slice to one context in ctx_list.
         data = gluon.utils.split_and_load(batch[0], ctx_list=ctx, batch_axis=0, even_split=False)
         label = gluon.utils.split_and_load(batch[1], ctx_list=ctx, batch_axis=0, even_split=False)
@@ -172,7 +201,9 @@ for epoch in range(epochs):
         batch_loss = sum([loss.mean().asscalar() for loss in loss_list]) / len(loss_list)
         train_loss += batch_loss
         metric.update(label, output_list)
-        print(f"[Epoch {epoch}], batch: {i:04d}, batch_loss: {batch_loss:0.5f}, lr: {trainer.learning_rate}")
+        toc_batch = time.time()
+        chrono_imgsec =  len(batch[0]) / (toc_batch - tic_batch)
+        print(f"[Epoch {epoch}], batch: {i:04d}, batch_loss: {batch_loss:0.5f}, lr: {trainer.learning_rate}, speed: {chrono_imgsec:0.2f} img/sec")
     # Get metrics
     train_loss /= num_batch
     _, train_acc = metric.get()
@@ -186,6 +217,7 @@ for epoch in range(epochs):
     H["val_loss"].append(val_loss)
     H["val_acc"].append(val_acc)
     H["chrono"].append(chrono)
+    plot_history(H, model_name)
     # Save best model, based on val_acc
     if val_acc > prev_val_acc:
         net.export(model_name, epoch)
@@ -195,8 +227,8 @@ for epoch in range(epochs):
         net.export(f"checkpoint_{model_name}", epoch)
         with open(f"{model_name}_hist.pkl", "wb") as fp:
             pkl.dump(H, fp)
-
-    pprint.pprint(H)
+    for k, v in H.items():
+        print(f"{k:>20}: {float(v[-1]):0.5f}")
 
 # Save last epoch checkpoint
 net.export(f"checkpoint_{model_name}", epoch)
