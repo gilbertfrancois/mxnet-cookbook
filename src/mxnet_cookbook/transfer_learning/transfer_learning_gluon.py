@@ -14,6 +14,7 @@
 
 import os
 import time
+import datetime
 
 import mxnet as mx
 import numpy as np
@@ -27,6 +28,7 @@ from mxnet.gluon.data.vision import transforms
 # %%
 # -- Hyperparameters
 
+timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
 classes = 23
 epochs = 5
 lr = 0.001
@@ -41,6 +43,9 @@ num_gpus = 0
 num_workers = 8
 ctx = [mx.gpu(i) for i in range(num_gpus)] if num_gpus > 0 else [mx.cpu()]
 batch_size = per_device_batch_size * max(num_gpus, 1)
+pretrained_model_name = "ResNet50_v2"
+model_name = f"minc_{pretrained_model_name.lower()}_{timestamp}"
+print(f"--- Model name: {model_name}")
 
 # %%
 # -- Data augmentation
@@ -98,8 +103,7 @@ test_data = gluon.data.DataLoader(
 # -- Model and Trainer
 
 x = nd.random.randn(1, 3, 224, 224)
-model_name = "ResNet50_v2"
-net = model_zoo.get_model(model_name, pretrained=True)
+net = model_zoo.get_model(pretrained_model_name, pretrained=True)
 
 # %%
 #
@@ -107,7 +111,7 @@ with net.name_scope():
     net.output = nn.Dense(classes)
 net.output.initialize(init.Xavier(), ctx=ctx)
 net.collect_params().reset_ctx(ctx)
-net.summary(x)
+# net.summary(x)
 net.hybridize()
 
 # %%
@@ -134,7 +138,9 @@ def test(net_, val_data_, ctx_):
 # -- Training Loop
 
 lr_counter = 0
+epoch = 0
 num_batch = len(train_data)
+prev_val_acc = -1
 
 for epoch in range(epochs):
     # Adapt learning rate if applicable
@@ -146,9 +152,10 @@ for epoch in range(epochs):
     train_loss = 0
     metric.reset()
     # Start training loop
-    print("--- Starting training loop...")
-    print(f"-- Using: {ctx}")
+    print(f"*** Starting training loop...")
+    print(f"--- Using: {ctx}")
     for i, batch in enumerate(train_data):
+        # Splits an NDArray into len(ctx_list) slices along batch_axis and loads each slice to one context in ctx_list.
         data = gluon.utils.split_and_load(batch[0], ctx_list=ctx, batch_axis=0, even_split=False)
         label = gluon.utils.split_and_load(batch[1], ctx_list=ctx, batch_axis=0, even_split=False)
         with autograd.record():
@@ -164,11 +171,20 @@ for epoch in range(epochs):
         train_loss += batch_loss
         metric.update(label, output_list)
         print(f"[Epoch {epoch}], batch: {i:04d}, batch_loss: {batch_loss:0.5f}")
-
+    # Get metrics
     train_loss /= num_batch
     _, train_acc = metric.get()
     _, val_acc = test(net, val_data, ctx)
+    # Save best model, based on val_acc
+    if val_acc > prev_val_acc:
+        net.export(model_name, epoch)
+    # Save every N epochs to be able to restart
+    if epoch % 10 == 0:
+        net.export(f"checkpoint_{model_name}", epoch)
 
     toc = time.time()
     chrono = toc - tic
     print(f"[Epoch {epoch}], train_acc: {train_acc:0.3f}, val_acc: {val_acc:0.3f}, chrono: {chrono}")
+
+# Save last epoch checkpoint
+net.export(f"checkpoint_{model_name}", epoch)
