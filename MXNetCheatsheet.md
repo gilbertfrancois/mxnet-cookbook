@@ -1,11 +1,5 @@
 # MXNet Cheatsheet
 
-
-
-
-
-
-
 ## Load / save a model
 
 ### Load a model
@@ -14,16 +8,16 @@ _Module_
 ```python
 sym, arg_params, aux_params = mx.model.load_checkpoint(model_prefix, 0)
 mod = mx.mod.Module(symbol=sym, context=ctx, label_names=None)
-mod.bind(for_training=False, data_shapes=[('data', (1,3,224,224))], 
-        label_shapes=mod._label_shapes)
+mod.bind(for_training=False, data_shapes=[('data', (1,3,224,224))], label_shapes=mod._label_shapes)
 mod.set_params(arg_params, aux_params, allow_missing=True)
 ```
 
 _Gluon_
 ```python
-
+net = gluon.nn.SymbolBlock.imports('resnet18-symbol.json', ['data'], param_file='resnet18-0000.params', ctx=mx.gpu())
 ```
 
+https://discuss.mxnet.io/t/load-params-from-symbol-models-to-gluon/804
 
 ## Update model from checkpoint
 
@@ -56,7 +50,11 @@ mod.fit(train_iter, num_epoch=5, epoch_end_callback=checkpoint)
 
 _Gluon_
 ```python
-
+for epoch in epochs:
+    # Train here...
+    net.export(f"{model_name}", epoch)  # Saves sym and params files
+    # or
+    net.save_parameters(f"{model_name}.params")   # Saves params only, model defined in code.
 ```
 
 ## Get all layers after loading
@@ -110,25 +108,24 @@ transformer = mxnet.gluon.data.vision.transform.ToTensor()
 ```
 
 ## Transfer learning
-### Freeze parameters of layers (Gluon)
+### Freeze parameters of layers
+
+_Gluon_
 
 You can set grad_req attribute to 'null' (it is a string) to prevent changes of this parameter. Here is the example. I define a set of parameter names I want to freeze and freeze them after creating my model, but before the initialization.
 
 ```python
-num_hidden = 10
-net = gluon.nn.Sequential()
-with net.name_scope():
-    net.add(gluon.nn.Dense(num_hidden, activation="relu"))
-    net.add(gluon.nn.Dense(num_hidden, activation="relu"))
-    net.add(gluon.nn.Dense(num_outputs))
-
-layers_to_freeze = set(['sequential1_dense0_weight', 'sequential1_dense0_bias', 'sequential1_dense1_weight', 'sequential1_dense1_bias'])    
-
+layers_to_freeze = set(['dense0_weight', 'dense0_bias', 'dense1_weight', 'dense1_bias'])    
 for p in net.collect_params().values():
     if p.name in layers_to_freeze:
         p.grad_req = 'null'
+```
 
-net.collect_params().initialize(mx.init.Xavier(magnitude=2.24), ctx=ctx)
+or
+
+```
+for param in net[24:].collect_params().values():
+    param.grad_req = 'write'
 ```
 
 https://discuss.mxnet.io/t/gluon-access-layer-weights/1160/2
@@ -138,10 +135,13 @@ https://discuss.mxnet.io/t/gluon-access-layer-weights/1160/2
 
 https://discuss.mxnet.io/t/layer-access-in-a-pre-trained-model/2248
 
-```python
-pretrained_net = model_zoo.get_model(pretrained_model_name, pretrained=True)
+_Gluon_
 
-pretrained_net
+Given VGG16:
+
+```python
+>>> net = model_zoo.get_model("VGG16", pretrained=True)
+>>> net
 Out[50]: 
 VGG(
   (features): HybridSequential(
@@ -183,7 +183,25 @@ VGG(
   )
   (output): Dense(4096 -> 1000, linear)
 )
+```
 
-conv0_weight = pretrained_net.features[0].weight.data()
-pretrained_net.features[0].weight.set_data(conv0_weight)
+Get the weight of the first convolutional layer:
+
+```python
+W0 = net.features[0].weight.data()
+```
+
+or
+
+```python
+W0 = net.collect_params().get("conv0_weight").data()
+```
+
+Note: it can be that the listed key contains a prefix. E.g. `net.collect_params().keys()` gives `['vgg0_conv0_weight', 'vgg0_conv0_bias', ...]`. When quering the value by key with the `get()` function, you have to remove the prefix first.
+
+or 
+
+```python
+for p in pretrained_net.collect_params().values():
+    print(p.name, p.data())
 ```
