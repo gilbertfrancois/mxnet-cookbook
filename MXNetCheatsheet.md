@@ -131,9 +131,11 @@ for param in net[24:].collect_params().values():
 https://discuss.mxnet.io/t/gluon-access-layer-weights/1160/2
 
 
-## Layer access in a pretrained model
+## Layer and parameter access in a pretrained model
 
 https://discuss.mxnet.io/t/layer-access-in-a-pre-trained-model/2248
+
+https://mxnet.apache.org/api/python/docs/tutorials/packages/gluon/blocks/parameters.html
 
 _Gluon_
 
