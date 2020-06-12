@@ -32,14 +32,19 @@ from mxnet.gluon.data.vision import transforms
 pretrained_model_name = "ResNet50_v2"
 timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
 classes = 23
-transfer_epochs = 20
-finetune_epochs = 50
+transfer_epochs = 50
 per_device_batch_size = 32
+sgd_momentum = 0.9
+sgd_wd = 0.0001
+lr_base = 0.0001
+lr_factor = 0.333
+lr_epoch_steps = 10
 num_gpus = 2
 num_workers = 16
 ctx = [mx.gpu(i) for i in range(num_gpus)] if num_gpus > 0 else [mx.cpu()]
 batch_size = per_device_batch_size * max(num_gpus, 1)
 model_name = f"minc_{pretrained_model_name.lower()}_{timestamp}"
+
 print(f"--- Model name: {model_name}")
 
 # %%
@@ -99,13 +104,50 @@ test_data = gluon.data.DataLoader(
 # -- Pretrained model
 
 x = nd.random.randn(1, 3, 224, 224)
-net = model_zoo.get_model(pretrained_model_name, pretrained=True)
+pretrained_net = model_zoo.get_model(pretrained_model_name, pretrained=True)
+
+# %%
+# -- Freeze feature layers and add new tail
+
+if pretrained_model_name == "VGG16":
+    pretrained_features = pretrained_net.features[:31]
+else:
+    pretrained_features = pretrained_net.features
+# Freeze pretrained layers
+for param in pretrained_features.collect_params().values():
+    param.grad_req = 'null'
+# Create new layers for the tail
+if pretrained_model_name == "VGG16":
+    new_tail = nn.HybridSequential()
+    new_tail.add(
+        nn.Dense(4096),
+        nn.Dropout(0.5),
+        nn.Activation("relu"),
+        nn.Dense(4096),
+        nn.Dropout(0.5),
+        nn.Dense(classes)
+    )
+    new_tail.initialize(init=mx.init.Xavier(), ctx=ctx)
+    # Create new net for transfer learning
+    net = nn.HybridSequential()
+    with net.name_scope():
+        for layer in pretrained_features:
+            net.add(layer)
+        for layer in new_tail:
+            net.add(layer)
+else:
+    net = pretrained_net
+    net.output = nn.Dense(classes)
+    net.output.initialize(init=mx.init.Xavier(), ctx=ctx)
+
+
+# DEBUG
+for index, param in enumerate(net.collect_params().values()):
+    print(f"{param.name:>40}: {param.grad_req}")
 
 # %%
 #
-with net.name_scope():
-    net.output = nn.Dense(classes)
-net.output.initialize(mx.init.Xavier(), ctx=ctx)
+
 net.collect_params().reset_ctx(ctx)
 
 # %%
@@ -251,3 +293,22 @@ scheduler = mx.lr_scheduler.FactorScheduler(base_lr=1e-5, factor=0.7, step=10 * 
 trainer = gluon.Trainer(net.collect_params(), "sgd", {"lr_scheduler": scheduler, "momentum": sgd_momentum, "wd": sgd_wd})
 
 train(transfer_epochs, transfer_epochs + finetune_epochs, H)
+
+
+# %%
+# --
+root_folder = "/home/gilbert/Development/git/mxnet-cookbook/src/mxnet_cookbook/transfer_learning"
+epoch = 63
+model_prefix = "minc_vgg16_202006110056"
+symbol_file = os.path.join(root_folder, f"{model_prefix}-symbol.json")
+param_file = os.path.join(root_folder, f"{model_prefix}-{epoch:04d}.params")
+net = gluon.nn.SymbolBlock.imports(symbol_file, ["data"], param_file=param_file, ctx=ctx)
+
+# %%
+# --
+
+epoch = 63
+root_folder = "/home/gilbert/Development/git/mxnet-cookbook/src/mxnet_cookbook/transfer_learning"
+model_prefix = "minc_vgg16_202006110056"
+param_file = os.path.join(root_folder, f"{model_prefix}-{epoch:04d}.params")
+net.load_parameters(param_file)
