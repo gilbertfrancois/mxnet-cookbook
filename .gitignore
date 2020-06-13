@@ -314,7 +314,7 @@ tags
 [._]*.un~
 
 Pipfile.lock
-data/
-output/
-
+/data
+/output
+/log
 /poetry.lock
