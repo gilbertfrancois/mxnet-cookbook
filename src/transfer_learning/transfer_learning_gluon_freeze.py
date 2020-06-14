@@ -98,7 +98,6 @@ test_data = gluon.data.DataLoader(
 # %%
 # -- Pretrained model
 
-x = nd.random.randn(1, 3, 224, 224)
 net = model_zoo.get_model(pretrained_model_name, pretrained=True)
 
 # %%
@@ -109,7 +108,7 @@ net.output.initialize(mx.init.Xavier(), ctx=ctx)
 net.collect_params().reset_ctx(ctx)
 
 # %%
-x = x.as_in_context(ctx[0])
+x = nd.random.randn(1, 3, 224, 224, ctx=ctx[0])
 net.summary(x)
 net.hybridize()
 
