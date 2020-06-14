@@ -31,17 +31,25 @@ from mxnet.gluon.nn import HybridSequential
 # Set logging to see some output during training
 logging.getLogger().setLevel(logging.DEBUG)
 
+# Hyperparameters
+
+N_GPUS = 0
+mx_ctx = [mx.gpu(i) for i in range(N_GPUS)] if N_GPUS > 0 else [mx.cpu()]
+N_WORKERS = 4
+EPOCHS = 10
+PER_DEVICE_BATCH_SIZE = 64
+BATCH_SIZE = PER_DEVICE_BATCH_SIZE * max(len(mx_ctx), 1)
+
+
 # Fix the seed
 mx.random.seed(42)
 
 # Set the compute context, GPU is available otherwise CPU
-mx_ctx = mx.gpu() if mx.test_utils.list_gpus() else mx.cpu()
+# mx_ctx = mx.gpu() if mx.test_utils.list_gpus() else mx.cpu()
 
 # %%
 # -- Constants
 
-EPOCHS = 50
-BATCH_SIZE = 64
 
 # %%
 # -- Get some data to train on
@@ -60,12 +68,12 @@ transformer = transforms.Compose([
 train_data = gluon.data.DataLoader(mnist_train.transform_first(transformer),
                                    batch_size=BATCH_SIZE,
                                    shuffle=True,
-                                   num_workers=8)
+                                   num_workers=N_WORKERS)
 
 eval_data = gluon.data.DataLoader(mnist_valid.transform_first(transformer),
                                   batch_size=BATCH_SIZE,
-                                  num_workers=8
-                                  )
+                                  shuffle=False,
+                                  num_workers=N_WORKERS)
 
 # %%
 # -- Define the model
@@ -98,13 +106,23 @@ with net.name_scope():
     )
 
 # %%
-# -- Hybridize, initialize parameters and run a forward pass once to generate a symbol which will be used later
+# -- Initialize parameters
+
+net.initialize(init=init.Xavier(), ctx=mx_ctx)
+
+# %%
+# -- Print summary before hybridizing
+
+x = nd.random.randn(1, 1, 28, 28, ctx=mx_ctx[0])
+# net.summary(x)
+
+# %%
+# -- Hybridize and run a forward pass once to generate a symbol which will be used later
 #    for plotting the network.
 
 net.hybridize()
-net.initialize(init=init.Xavier(), ctx=mx_ctx)
-x = nd.random.randn(1, 1, 28, 28, ctx=mx_ctx)
-_ = net(x)
+net(x)
+
 
 # %%
 # -- Define loss function and optimizer
@@ -113,6 +131,8 @@ loss_fn = gluon.loss.SoftmaxCrossEntropyLoss()
 lr_scheduler = mx.lr_scheduler.FactorScheduler(base_lr=0.001, factor=0.333, step=10*len(train_data))
 trainer = gluon.Trainer(net.collect_params(), 'Adam', {'lr_scheduler': lr_scheduler})
 
+train_metric = mx.metric.Accuracy()
+eval_metric = mx.metric.Accuracy()
 
 # %%%
 # -- Custom metric function
@@ -134,45 +154,51 @@ with SummaryWriter(logdir=f"../../log/{timestamp}_mnist_gluon", flush_secs=5) as
     prev_val_acc = -1
 
     for epoch in range(EPOCHS):
-        tic_epoch = time.time()
+        train_metric.reset()
+        eval_metric.reset()
         train_loss = 0
+        eval_loss = 0
         train_acc = 0
         eval_acc = 0
-        train_emb = []
-        train_labels = []
-        eval_emb = []
-        eval_labels = []
 
-        for i, (data, label) in enumerate(train_data):
-            data = data.as_in_context(mx_ctx)
-            label = label.as_in_context(mx_ctx)
+        # Forward pass and update weights
+        tic_epoch = time.time()
+        for i, batch in enumerate(train_data):
+            data = gluon.utils.split_and_load(batch[0], ctx_list=mx_ctx, batch_axis=0, even_split=False)
+            label = gluon.utils.split_and_load(batch[1], ctx_list=mx_ctx, batch_axis=0, even_split=False)
             with autograd.record():
-                output = net(data)
-                loss = loss_fn(output, label)
-            loss.backward()
+                output_list = [net(X) for X in data]
+                loss_list = [loss_fn(yhat, y) for yhat, y in zip(output_list, label)]
+            for loss in loss_list:
+                loss.backward()
             trainer.step(batch_size=BATCH_SIZE)
-            train_loss += loss.mean().asscalar()
-            train_acc += acc(output, label)
-
-        for data, label in eval_data:
-            data = data.as_in_context(mx_ctx)
-            label = label.as_in_context(mx_ctx)
-            eval_acc += acc(net(data), label)
-
-        train_loss /= len(train_data)
-        train_acc /= len(train_data)
-        eval_acc /= len(eval_data)
-
+            train_loss += sum([loss.mean().asscalar() for loss in loss_list]) / len(loss_list)
+            train_metric.update(label, output_list)
         toc_epoch = time.time()
         chrono_epoch = toc_epoch - tic_epoch
-        img_per_sec = len(train_data) / chrono_epoch
-        print(f"epoch {epoch}, loss {train_loss:0.3f}, acc {train_acc:0.3f}, val_acc {eval_acc:0.3f}, lr: {trainer.learning_rate}, img/sec: {img_per_sec:0.2f}")
+
+        # Evaluate
+        for i, batch in enumerate(eval_data):
+            data = gluon.utils.split_and_load(batch[0], ctx_list=mx_ctx, batch_axis=0, even_split=False)
+            label = gluon.utils.split_and_load(batch[1], ctx_list=mx_ctx, batch_axis=0, even_split=False)
+            output_list = [net(X) for X in data]
+            loss_list = [loss_fn(yhat, y) for yhat, y in zip(output_list, label)]
+            eval_loss += sum([loss.mean().asscalar() for loss in loss_list]) / len(loss_list)
+            eval_metric.update(label, output_list)
+
+        train_loss /= len(train_data)
+        eval_loss /= len(eval_data)
+        _, train_acc = train_metric.get()
+        _, eval_acc = eval_metric.get()
+
+        img_per_sec = len(mnist_train) / chrono_epoch
+        print(f"{len(mnist_train)}, epoch {epoch}, train_loss {train_loss:0.3f}, acc {train_acc:0.3f}, val_loss: {eval_loss:0.3f}, val_acc {eval_acc:0.3f}, lr: {trainer.learning_rate}, img/sec: {img_per_sec:0.2f}, chrono: {chrono_epoch:0.2f}")
 
         # Add some values to mxboard
         sw.add_scalar("Accuracy", ("train_acc", train_acc), global_step=epoch)
         sw.add_scalar("Accuracy", ("val_acc", eval_acc), global_step=epoch)
         for key, param in net.collect_params(".*weight").items():
-            sw.add_histogram(param.name, param.grad(), global_step=epoch)
+            sw.add_histogram(f"grad_{param.name}", param.grad(ctx=mx_ctx[0]), global_step=epoch)
 
         # Save parameters if they are better than the previous epoch
         if eval_acc > prev_val_acc:
@@ -180,7 +206,7 @@ with SummaryWriter(logdir=f"../../log/{timestamp}_mnist_gluon", flush_secs=5) as
             prev_val_acc = eval_acc
 
 
-    print("Elapsed time {:02f} seconds".format(time.time() - t0))
+print("=== Total training time: {:02f} seconds".format(time.time() - t0))
 
 # %%
 # -- Save parameters
