@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 import mxnet as mx
 import mxnet.ndarray as nd
+from mxboard import SummaryWriter
 from mxnet import gluon
 from mxnet import autograd
 from mxnet.gluon import nn, utils
@@ -186,6 +187,13 @@ def main():
     preview_train_data(train_data)
 
     netG = UnetGenerator(in_channels=3, num_downs=8)
+    print(netG)
+    netG.hybridize()
+    x = nd.zeros(shape=(1, 3, 256, 256))
+    netG.initialize()
+    netG(x)
+    with SummaryWriter(logdir=f"../../log/p2p", flush_secs=5) as sw:
+        sw.add_graph(netG)
 
 
 if __name__ == '__main__':
