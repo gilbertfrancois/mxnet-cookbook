@@ -136,18 +136,20 @@ for num1, i in enumerate(valid_anchor_boxes):
             iou = 0.
         ious[num1, num2] = iou
 print(ious.shape)
+ious = ious.asnumpy()
 # %%
 
 gt_argmax_ious = ious.argmax(axis=0)
 gt_max_ious = ious.max(axis=0)
-print(gt_argmax_ious)
-print(gt_max_ious)
-
 argmax_ious = ious.argmax(axis=1)
-max_ious = ious[np.arange(len(index_inside)), argmax_ious]
-print(argmax_ious)
-print(max_ious)
-gt_argmax_ious = np.where(ious.asnumpy() == gt_max_ious.asnumpy())[0]
+max_ious = ious.max(axis=1)
+print("Ground truth: ", gt_argmax_ious.shape, gt_max_ious.shape)
+print("Anchor boxes: ", argmax_ious.shape, max_ious.shape)
+
+# %%
+# -- Find the anchor boxes which have this max_ious (gt_max_ious)
+
+# %%
 
 # %%
 
@@ -156,8 +158,10 @@ plt.title("Ground truth bounding boxes")
 plt.show()
 
 # %%
-print(anchor_boxes[gt_argmax_ious].shape)
-gluoncv.utils.viz.plot_bbox(_img, valid_anchor_boxes[gt_argmax_ious], scores=None, labels=None)
+print(type(valid_anchor_boxes))
+all_boxes = nd.concat(valid_anchor_boxes[gt_argmax_ious], bbox)
+all_labels = nd.concat(nd.ones(shape=(valid_anchor_boxes[gt_argmax_ious]).shape), labels)
+gluoncv.utils.viz.plot_bbox(_img, all_boxes, scores=None, labels=all_labels)
 plt.title("IOU anchor boxes")
 plt.show()
 
@@ -168,3 +172,15 @@ pos_iou_threshold = 0.7
 neg_iou_threshold = 0.3
 
 # %%
+label = np.zeros(shape=ious.shape)
+label[max_ious < neg_iou_threshold] = 0
+label[gt_argmax_ious] = 1
+label[max_ious >= pos_iou_threshold] = 1
+
+
+# %%
+label_rpn = nd.zeros(shape=max_ious.shape) * -1
+label_rpn = nd.where(max_ious < neg_iou_threshold, nd.zeros(shape=label_rpn.shape), label_rpn)
+label_rpn[[gt_argmax_ious]] = 1
+label_rpn = nd.where(max_ious > pos_iou_threshold, nd.ones(shape=label_rpn.shape), label_rpn)
+
