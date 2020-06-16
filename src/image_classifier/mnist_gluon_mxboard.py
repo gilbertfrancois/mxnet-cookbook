@@ -26,6 +26,7 @@ from mxnet.gluon.nn import Dense
 from mxnet.gluon.nn import Dropout
 from mxnet.gluon.nn import Flatten
 from mxnet.gluon.nn import MaxPool2D
+from mxnet.gluon.nn import Activation
 from mxnet.gluon.nn import HybridSequential
 
 # Set logging to see some output during training
@@ -33,10 +34,10 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 # Hyperparameters
 
-N_GPUS = 0
+N_GPUS = 2
 mx_ctx = [mx.gpu(i) for i in range(N_GPUS)] if N_GPUS > 0 else [mx.cpu()]
 N_WORKERS = 4
-EPOCHS = 10
+EPOCHS = 50
 PER_DEVICE_BATCH_SIZE = 64
 BATCH_SIZE = PER_DEVICE_BATCH_SIZE * max(len(mx_ctx), 1)
 
@@ -82,25 +83,30 @@ net = HybridSequential()
 with net.name_scope():
     net.add(
         # block 1
-        Conv2D(channels=32, kernel_size=(5, 5), padding=(5 // 2, 5 // 2), activation='relu'),
+        Conv2D(channels=32, kernel_size=(5, 5), strides=(1, 1), padding=(2, 2)),
+        Activation("relu"),
         BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
-        Conv2D(channels=32, kernel_size=(5, 5), padding=(5 // 2, 5 // 2), activation='relu'),
+        Conv2D(channels=32, kernel_size=(5, 5), strides=(1, 1), padding=(2, 2)),
+        Activation("relu"),
         BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
         MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
         BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
         Dropout(0.5),
         # block 2
-        Conv2D(channels=64, kernel_size=(3, 3), padding=(3 // 2, 3 // 2), activation='relu'),
+        Conv2D(channels=64, kernel_size=(3, 3), strides=(1, 1), padding=(1, 1)),
+        Activation("relu"),
         BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
-        Conv2D(channels=64, kernel_size=(3, 3), padding=(3 // 2, 3 // 2), activation='relu'),
+        Conv2D(channels=128, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)),
+        Activation("relu"),
         BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
-        MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
-        BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+        # MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
+        # BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
         Dropout(0.5),
         # block 3
         Flatten(),
-        Dense(128, activation='relu'),
-        BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+        Dense(128),
+        Activation("relu"),
+        BatchNorm(),
         Dropout(0.3),
         Dense(10)
     )
@@ -114,7 +120,7 @@ net.initialize(init=init.Xavier(), ctx=mx_ctx)
 # -- Print summary before hybridizing
 
 x = nd.random.randn(1, 1, 28, 28, ctx=mx_ctx[0])
-# net.summary(x)
+net.summary(x)
 
 # %%
 # -- Hybridize and run a forward pass once to generate a symbol which will be used later
