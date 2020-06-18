@@ -2,8 +2,9 @@
 # Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, Alexei A. Efros
 # https://arxiv.org/abs/1611.07004
 #
-# This file follows closely the Pixel2Pixel example from
+# This script follows closely the Pixel2Pixel example from
 # https://gluon.mxnet.io/chapter14_generative-adversarial-networks/pixel2pixel.html
+
 
 import os
 import tarfile
@@ -36,7 +37,7 @@ import gluoncv
 # %%
 # -- Settings
 
-N_GPUS = 1
+N_GPUS = 2
 INPUT_SHAPE = (256, 256, 3)
 EPOCHS = 100
 BATCH_SIZE_PER_DEVICE = 10
@@ -44,7 +45,7 @@ BATCH_SIZE = BATCH_SIZE_PER_DEVICE * max(N_GPUS, 1)
 LR = 0.0002
 BETA1 = 0.5
 LAMBDA1 = 100
-POOL_SIZE = 50
+POOL_SIZE = 50 // N_GPUS
 DATASET = "facades"
 
 mx_ctx = [mx.gpu(i) for i in range(N_GPUS)] if N_GPUS > 0 else [mx.cpu()]
@@ -261,7 +262,8 @@ class Discriminator(HybridBlock):
 #    input and fake output.
 
 class ImagePool():
-    def __init__(self, pool_size):
+    def __init__(self, pool_size, ctx):
+        self.ctx = ctx
         self.pool_size = pool_size
         if self.pool_size > 0:
             self.n_images = 0
@@ -326,9 +328,10 @@ def set_network(lr, beta1):
     network_init(netG)
     network_init(netD)
 
-    x_test = nd.zeros(shape=(1,3,256,256))
-    print(netD(nd.concat(x_test, x_test, dim=1)))
-    print(netG(x_test))
+    x = nd.zeros(shape=(1,3,256,256))
+
+    netG(x)
+    netD(nd.concat(x, x, dim=1))
 
     netG.hybridize()
     netD.hybridize()
@@ -362,8 +365,6 @@ def facc(label, pred):
     # if isinstance(pred, list):
     #     pred = [p.as_in_context(mx.cpu()) for p in pred]
     #     pred = nd.concat(*pred, dim=0).asnumpy()
-    print("--- facc")
-    print(type(label), type(pred))
     pred = pred.ravel()
     label = label.ravel()
     return ((pred > 0.5) == label).mean()
@@ -372,8 +373,8 @@ def facc(label, pred):
 
 
 def train():
-    image_pool = ImagePool(POOL_SIZE)
-    # metric = mx.metric.CustomMetric(facc)
+    image_pool_list = [ImagePool(POOL_SIZE, ctx) for ctx in mx_ctx]
+    metric = mx.metric.CustomMetric(facc)
 
     timestamp = datetime.now().strftime('%Y%m%d%H%M')
     logging.basicConfig(level=logging.DEBUG)
@@ -389,29 +390,46 @@ def train():
             ###########################
             # real_in = batch.data[0].as_in_context(mx_ctx[0])
             # real_out = batch.data[1].as_in_context(mx_ctx[0])
-            real_in_list = gluoncv.utils.split_and_load(batch.data[0], ctx_list=mx_ctx, batch_axis=0)
-            real_out_list = gluoncv.utils.split_and_load(batch.data[1], ctx_list=mx_ctx, batch_axis=0)
+            real_in_list = gluoncv.utils.split_and_load(batch.data[0], ctx_list=mx_ctx, batch_axis=0, even_split=True)
+            real_out_list = gluoncv.utils.split_and_load(batch.data[1], ctx_list=mx_ctx, batch_axis=0, even_split=True)
 
             fake_out_list = [netG(real_in) for real_in in real_in_list]
-            fake_concat_list = [image_pool.query(nd.concat(real_in, fake_out, dim=1)) for real_in, fake_out in zip(real_in_list, fake_out_list)]
+            fake_concat_list = []
+            for i, ctx in enumerate(mx_ctx):
+                real_in = real_in_list[i]
+                fake_out = fake_out_list[i]
+                fake_concat = image_pool_list[i].query(nd.concat(real_in_list[i], fake_out_list[i], dim=1))
+                assert real_in.context == ctx
+                assert fake_out.context == ctx
+                assert fake_concat.context == ctx
+                fake_concat_list.append(fake_concat)
+            # fake_concat_list = [image_pool.query(nd.concat(real_in, fake_out, dim=1)) for real_in, fake_out in zip(real_in_list, fake_out_list)]
             with autograd.record():
                 # Train with fake image
                 # Use image pooling to utilize history images
                 output_fake_list = [netD(fake_concat) for fake_concat in fake_concat_list]
-                fake_label_list = [nd.zeros(output.shape, ctx=ctx) for ctx, output in zip(mx_ctx, output_fake_list)]
+                fake_label_list = [nd.zeros(output.shape, ctx=output.context) for output in output_fake_list]
                 errD_fake_list = [GAN_loss(output, fake_label) for output, fake_label in zip(output_fake_list, fake_label_list)]
-                # metric.update(fake_label_list, output_fake_list)
+
+                metric.update(fake_label_list, output_fake_list)
                 # Train with real image
+
                 real_concat_list = [nd.concat(real_in, real_out, dim=1) for real_in, real_out in zip(real_in_list, real_out_list)]
+
                 output_real_list = [netD(real_concat) for real_concat in real_concat_list]
                 real_label_list = [nd.ones(output.shape, ctx=ctx) for output, ctx in zip(output_real_list, mx_ctx)]
                 errD_real_list = [GAN_loss(output, real_label) for output, real_label in zip(output_real_list, real_label_list)]
+
+                assert len(errD_real_list) == len(mx_ctx)
+                assert len(errD_fake_list) == len(mx_ctx)
                 errD_list = []
                 for errD_real, errD_fake in zip(errD_real_list, errD_fake_list):
                     errD = (errD_real + errD_fake) * 0.5
                     errD.backward()
                     errD_list.append(errD)
-                # metric.update(real_label_list, output_real_list)
+                assert(isinstance(real_label_list, list))
+                assert(isinstance(output_real_list, list))
+                metric.update(real_label_list, output_real_list)
 
             trainerD.step(batch.data[0].shape[0])
 
@@ -433,25 +451,24 @@ def train():
             # Print log infomation every ten batches
             if iter % 10 == 0:
                 # @todo: compute loss over all devices, not just the first device
-                # name, acc = metric.get()
+                name, acc = metric.get()
                 logging.info('speed: {} samples/s'.format(BATCH_SIZE / (time.time() - btic)))
                 logging.info('discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
-                         %(nd.mean(errD_list[0]).asscalar(),
-                           nd.mean(errG_list[0]).asscalar(), 1, iter, epoch))
+                         %(nd.mean(errD_list[0].as_in_context(mx.cpu())).asscalar(),
+                           nd.mean(errG_list[0].as_in_context(mx.cpu())).asscalar(), 1, iter, epoch))
             iter = iter + 1
-            btic = time.time()
 
-        # name, acc = metric.get()
-        # metric.reset()
-        # logging.info('\nbinary training acc at epoch %d: %s=%f' % (epoch, name, acc))
+        name, acc = metric.get()
+        metric.reset()
+        logging.info('\nbinary training acc at epoch %d: %s=%f' % (epoch, name, acc))
         logging.info('time: %f' % (time.time() - tic))
 
         # Visualize one generated image for each epoch
         fake_img = fake_out_list[0][0]
         visualize(fake_img)
         plt.show()
-        netG.save_parameters(f"{timestamp}_net_g.params")
-        netD.save_parameters(f"{timestamp}_net_d.params")
+        netG.save_parameters(f"{timestamp}_{DATASET}_net_g.params")
+        netD.save_parameters(f"{timestamp}_{DATASET}_net_d.params")
 
 train()
 
