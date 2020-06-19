@@ -88,10 +88,10 @@ def load_data(path, batch_size, input_shape, is_reversed=False):
             img_in_list.append(img_arr_out if is_reversed else img_arr_in)
             img_out_list.append(img_arr_in if is_reversed else img_arr_out)
 
-    res = mx.io.NDArrayIter(data=[nd.concat(*img_in_list, dim=0),
-                                  nd.concat(*img_out_list, dim=0)],
-                            batch_size=batch_size)
-    return res
+    img_in_arr = nd.concat(*img_in_list, dim=0)
+    img_out_arr = nd.concat(*img_out_list, dim=0)
+
+    return mx.io.NDArrayIter(data=[img_in_arr, img_out_arr], batch_size=batch_size)
 
 
 # %%
@@ -105,9 +105,12 @@ val_data = load_data(val_image_path, BATCH_SIZE, INPUT_SHAPE, is_reversed=True)
 # %%
 # -- Visualize some training images
 
+def denormalize(img_arr):
+    return ((img_arr.asnumpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8)
+
 
 def visualize(img_arr):
-    plt.imshow(((img_arr.asnumpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8))
+    plt.imshow(denormalize(img_arr))
     plt.axis('off')
 
 
@@ -119,6 +122,17 @@ def preview_train_data(train_data):
         plt.subplot(2, 4, i + 5)
         visualize(img_out_list[i])
     plt.show()
+
+
+def preview_images(real_in_arr, real_out_arr, fake_out_arr, n_cols=4, title=""):
+    fig, axs = plt.subplots(3, n_cols)
+    for i in range(n_cols):
+        axs[0][i].imshow(denormalize(real_in_arr[i]))
+        axs[1][i].imshow(denormalize(real_out_arr[i]))
+        axs[2][i].imshow(denormalize(fake_out_arr[i]))
+    plt.title(title)
+    plt.show()
+
 
 
 preview_train_data(train_data)
@@ -251,13 +265,13 @@ class Discriminator(HybridBlock):
                 self.model.add(Activation(activation='sigmoid'))
 
     def hybrid_forward(self, F, x):
-        out = self.model(x)
-        return out
+        return self.model(x)
 
 
 # %%
 # -- We use history image pool to help discriminator memorize history errors instead of just comparing current real
 #    input and fake output.
+
 class ImagePool():
     def __init__(self, pool_size):
         self.pool_size = pool_size
@@ -353,7 +367,7 @@ def train():
     image_pool = ImagePool(POOL_SIZE)
     metric = mx.metric.CustomMetric(facc)
 
-    stamp = datetime.now().strftime('%Y_%m_%d-%H_%M')
+    timestamp = datetime.now().strftime('%Y%m%d%H%M')
     logging.basicConfig(level=logging.DEBUG)
 
     for epoch in range(EPOCHS):
@@ -367,8 +381,8 @@ def train():
             ###########################
             real_in = batch.data[0].as_in_context(mx_ctx[0])
             real_out = batch.data[1].as_in_context(mx_ctx[0])
-
             fake_out = netG(real_in)
+            preview_images(real_in, real_out, fake_out, n_cols=4, title="Update D")
             fake_concat = image_pool.query(nd.concat(real_in, fake_out, dim=1))
             with autograd.record():
                 # Train with fake image
@@ -383,6 +397,8 @@ def train():
                 output = netD(real_concat)
                 real_label = nd.ones(output.shape, ctx=mx_ctx[0])
                 errD_real = GAN_loss(output, real_label)
+
+                # compute combined loss
                 errD = (errD_real + errD_fake) * 0.5
                 errD.backward()
                 metric.update([real_label, ], [output, ])
@@ -395,6 +411,7 @@ def train():
             with autograd.record():
                 fake_out = netG(real_in)
                 fake_concat = nd.concat(real_in, fake_out, dim=1)
+                preview_images(real_in, real_out, fake_out, n_cols=4, title="Update Gen")
                 output = netD(fake_concat)
                 real_label = nd.ones(output.shape, ctx=mx_ctx[0])
                 errG = GAN_loss(output, real_label) + L1_loss(real_out, fake_out) * LAMBDA1
@@ -419,9 +436,9 @@ def train():
         logging.info('time: %f' % (time.time() - tic))
 
         # Visualize one generated image for each epoch
-        fake_img = fake_out[0]
-        visualize(fake_img)
-        plt.show()
+        preview_images(real_in, real_out, fake_out)
+        netG.save_parameters(f"{timestamp}_{DATASET}_net_g.params")
+        netD.save_parameters(f"{timestamp}_{DATASET}_net_d.params")
 
 
 train()

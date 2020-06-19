@@ -30,6 +30,7 @@ from mxnet.gluon.nn import HybridSequential
 from mxnet.gluon.nn import HybridBlock
 from mxnet.gluon.nn import LeakyReLU
 from datetime import datetime
+import gluoncv
 import time
 import logging
 import gluoncv
@@ -39,14 +40,16 @@ import gluoncv
 
 N_GPUS = 2
 INPUT_SHAPE = (256, 256, 3)
-EPOCHS = 100
-BATCH_SIZE_PER_DEVICE = 10
+EPOCHS = 101
+BATCH_SIZE_PER_DEVICE = 8
 BATCH_SIZE = BATCH_SIZE_PER_DEVICE * max(N_GPUS, 1)
 LR = 0.0002
 BETA1 = 0.5
-LAMBDA1 = 100
+LAMBDA1 = 90
+LAMBDA2 = 0.01
 POOL_SIZE = 50 // N_GPUS
 DATASET = "facades"
+DEBUG = False
 
 mx_ctx = [mx.gpu(i) for i in range(N_GPUS)] if N_GPUS > 0 else [mx.cpu()]
 
@@ -70,7 +73,7 @@ def download_data(root_folder, dataset):
     os.remove(data_file)
 
 
-def load_data(path, batch_size, input_shape, is_reversed=False):
+def load_data(path, batch_size, input_shape, is_reversed=False, shuffle=False):
     img_in_list = []
     img_out_list = []
     for path, _, fnames in os.walk(path):
@@ -90,26 +93,29 @@ def load_data(path, batch_size, input_shape, is_reversed=False):
             img_in_list.append(img_arr_out if is_reversed else img_arr_in)
             img_out_list.append(img_arr_in if is_reversed else img_arr_out)
 
-    res = mx.io.NDArrayIter(data=[nd.concat(*img_in_list, dim=0),
-                                  nd.concat(*img_out_list, dim=0)],
-                            batch_size=batch_size)
-    return res
+    img_in_arr = nd.concat(*img_in_list, dim=0)
+    img_out_arr = nd.concat(*img_out_list, dim=0)
+
+    return mx.io.NDArrayIter(data=[img_in_arr, img_out_arr], batch_size=batch_size, shuffle=shuffle)
 
 
 # %%
 # -- Load datasets
 
 download_data(data_root_folder, DATASET)
-train_data = load_data(train_image_path, BATCH_SIZE, INPUT_SHAPE, is_reversed=True)
+train_data = load_data(train_image_path, BATCH_SIZE, INPUT_SHAPE, is_reversed=True, shuffle=True)
 val_data = load_data(val_image_path, BATCH_SIZE, INPUT_SHAPE, is_reversed=True)
 
 
 # %%
 # -- Visualize some training images
 
+def denormalize(img_arr):
+    return ((img_arr.asnumpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8)
+
 
 def visualize(img_arr):
-    plt.imshow(((img_arr.asnumpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8))
+    plt.imshow(denormalize(img_arr))
     plt.axis('off')
 
 
@@ -120,6 +126,19 @@ def preview_train_data(train_data):
         visualize(img_in_list[i])
         plt.subplot(2, 4, i + 5)
         visualize(img_out_list[i])
+    plt.show()
+
+
+def preview_images(real_in_arr, real_out_arr, fake_out_arr, n_cols=4, title=""):
+    fig, axs = plt.subplots(3, n_cols)
+    for i in range(n_cols):
+        axs[0][i].imshow(denormalize(real_in_arr[i]))
+        axs[0][i].axis("off")
+        axs[1][i].imshow(denormalize(real_out_arr[i]))
+        axs[1][i].axis("off")
+        axs[2][i].imshow(denormalize(fake_out_arr[i]))
+        axs[2][i].axis("off")
+    plt.suptitle(title)
     plt.show()
 
 
@@ -253,8 +272,7 @@ class Discriminator(HybridBlock):
                 self.model.add(Activation(activation='sigmoid'))
 
     def hybrid_forward(self, F, x):
-        out = self.model(x)
-        return out
+        return self.model(x)
 
 
 # %%
@@ -328,13 +346,13 @@ def set_network(lr, beta1):
     network_init(netG)
     network_init(netD)
 
-    x = nd.zeros(shape=(1,3,256,256))
+    x = nd.zeros(shape=(1, 3, 256, 256))
 
     netG(x)
     netD(nd.concat(x, x, dim=1))
 
-    netG.hybridize()
-    netD.hybridize()
+    # netG.hybridize()
+    # netD.hybridize()
 
     netG.collect_params().reset_ctx(mx_ctx)
     netD.collect_params().reset_ctx(mx_ctx)
@@ -348,7 +366,40 @@ def set_network(lr, beta1):
 netG, netD, trainerG, trainerD = set_network(LR, BETA1)
 
 # %%
+# -- VGG16 as loss function
+
+feature_extractor = gluoncv.model_zoo.get_model("VGG16", pretrained=True)
+feature_extractor.collect_params().reset_ctx(mx_ctx)
+
+
+# %%
 # -- Loss
+
+def forward_vgg_features(x):
+    l1 = feature_extractor.features[:2]
+    l2 = feature_extractor.features[:7]
+    l3 = feature_extractor.features[:12]
+    l4 = feature_extractor.features[:19]
+    l5 = feature_extractor.features[:26]
+    y = []
+    for layer in [l1, l2, l3]:
+       y.append(layer(x))
+    return y
+
+def feature_loss_fn(data, label):
+    # @todo: normalize input for vgg
+    y_data_list = forward_vgg_features(data)
+    y_label_list = forward_vgg_features(label)
+    loss = []
+    for i in range(len(y_data_list)):
+        _loss = nd.sum(nd.square(y_data_list[i] - y_label_list[i]), axis=[1,2,3])
+        assert _loss.shape[0] == y_data_list[i].shape[0]
+        loss.append(_loss)
+
+    fv1 = feature_extractor.features(data).reshape(data.shape[0], 512)
+    fv2 = feature_extractor.features(label).reshape(label.shape[0], 512)
+    dist = nd.sum(nd.square(fv2 - fv1), axis=1)
+    return dist
 
 
 GAN_loss = gluon.loss.SigmoidBinaryCrossEntropyLoss()
@@ -369,7 +420,15 @@ def facc(label, pred):
     label = label.ravel()
     return ((pred > 0.5) == label).mean()
 
+
 # %%
+def validate(data_iterator, n_cols, title):
+    data_iterator.reset()
+    batch = data_iterator.next()
+    real_in = batch.data[0]
+    real_out = batch.data[1]
+    fake_out = netG(real_in.as_in_context(mx_ctx[0]))
+    preview_images(real_in, real_out, fake_out, n_cols, title)
 
 
 def train():
@@ -382,53 +441,51 @@ def train():
     for epoch in range(EPOCHS):
         tic = time.time()
         train_data.reset()
+        metric.reset()
         iter = 0
         for batch in train_data:
             btic = time.time()
             ############################
             # (1) Update D network: maximize log(D(x, y)) + log(1 - D(x, G(x, z)))
             ###########################
-            # real_in = batch.data[0].as_in_context(mx_ctx[0])
-            # real_out = batch.data[1].as_in_context(mx_ctx[0])
-            real_in_list = gluoncv.utils.split_and_load(batch.data[0], ctx_list=mx_ctx, batch_axis=0, even_split=True)
-            real_out_list = gluoncv.utils.split_and_load(batch.data[1], ctx_list=mx_ctx, batch_axis=0, even_split=True)
-
+            real_in_list = gluoncv.utils.split_and_load(batch.data[0], ctx_list=mx_ctx, batch_axis=0, even_split=False)
+            real_out_list = gluoncv.utils.split_and_load(batch.data[1], ctx_list=mx_ctx, batch_axis=0, even_split=False)
             fake_out_list = [netG(real_in) for real_in in real_in_list]
+            if DEBUG:
+                for i in range(len(mx_ctx)):
+                    preview_images(real_in_list[i], real_out_list[i], fake_out_list[i], n_cols=4,
+                                   title=f"Update Dis {i}")
+
             fake_concat_list = []
             for i, ctx in enumerate(mx_ctx):
                 real_in = real_in_list[i]
                 fake_out = fake_out_list[i]
                 fake_concat = image_pool_list[i].query(nd.concat(real_in_list[i], fake_out_list[i], dim=1))
-                assert real_in.context == ctx
-                assert fake_out.context == ctx
-                assert fake_concat.context == ctx
                 fake_concat_list.append(fake_concat)
             # fake_concat_list = [image_pool.query(nd.concat(real_in, fake_out, dim=1)) for real_in, fake_out in zip(real_in_list, fake_out_list)]
             with autograd.record():
+
                 # Train with fake image
-                # Use image pooling to utilize history images
                 output_fake_list = [netD(fake_concat) for fake_concat in fake_concat_list]
                 fake_label_list = [nd.zeros(output.shape, ctx=output.context) for output in output_fake_list]
-                errD_fake_list = [GAN_loss(output, fake_label) for output, fake_label in zip(output_fake_list, fake_label_list)]
-
+                errD_fake_list = [GAN_loss(output, fake_label) for output, fake_label in
+                                  zip(output_fake_list, fake_label_list)]
                 metric.update(fake_label_list, output_fake_list)
+
                 # Train with real image
-
-                real_concat_list = [nd.concat(real_in, real_out, dim=1) for real_in, real_out in zip(real_in_list, real_out_list)]
-
+                real_concat_list = [nd.concat(real_in, real_out, dim=1) for real_in, real_out in
+                                    zip(real_in_list, real_out_list)]
                 output_real_list = [netD(real_concat) for real_concat in real_concat_list]
                 real_label_list = [nd.ones(output.shape, ctx=ctx) for output, ctx in zip(output_real_list, mx_ctx)]
-                errD_real_list = [GAN_loss(output, real_label) for output, real_label in zip(output_real_list, real_label_list)]
+                errD_real_list = [GAN_loss(output, real_label) for output, real_label in
+                                  zip(output_real_list, real_label_list)]
 
-                assert len(errD_real_list) == len(mx_ctx)
-                assert len(errD_fake_list) == len(mx_ctx)
+                # compute combined loss
                 errD_list = []
                 for errD_real, errD_fake in zip(errD_real_list, errD_fake_list):
                     errD = (errD_real + errD_fake) * 0.5
                     errD.backward()
                     errD_list.append(errD)
-                assert(isinstance(real_label_list, list))
-                assert(isinstance(output_real_list, list))
                 metric.update(real_label_list, output_real_list)
 
             trainerD.step(batch.data[0].shape[0])
@@ -438,37 +495,53 @@ def train():
             ###########################
             with autograd.record():
                 fake_out_list = [netG(real_in) for real_in in real_in_list]
-                fake_concat_list = [nd.concat(real_in, fake_out, dim=1) for real_in, fake_out in zip(real_in_list, fake_out_list)]
-
+                fake_concat_list = [nd.concat(real_in, fake_out, dim=1) for real_in, fake_out in
+                                    zip(real_in_list, fake_out_list)]
+                if DEBUG:
+                    for i in range(len(mx_ctx)):
+                        preview_images(real_in_list[i], real_out_list[i], fake_out_list[i], n_cols=4,
+                                       title=f"Update Gen {i}")
                 output_list = [netD(fake_concat) for fake_concat in fake_concat_list]
                 real_label_list = [nd.ones(output.shape, ctx=ctx) for output, ctx in zip(output_list, mx_ctx)]
-                errG_list = [GAN_loss(output, real_label) + L1_loss(real_out, fake_out) * LAMBDA1 for output, real_label, real_out, fake_out in zip(output_list, real_label_list, real_out_list, fake_out_list)]
+                errG_list = []
+                for output, real_label, real_out, fake_out in zip(output_list, real_label_list, real_out_list,
+                                                                  fake_out_list):
+                    loss1 = GAN_loss(output, real_label)
+                    loss2 = L1_loss(real_out, fake_out)
+                    loss3 = feature_loss_fn(real_out, fake_out)
+                    errG_list.append(loss1 + LAMBDA1 * loss2 + LAMBDA2 * loss3)
                 for errG in errG_list:
                     errG.backward()
 
             trainerG.step(batch.data[0].shape[0])
-
+            btoc = time.time()
             # Print log infomation every ten batches
             if iter % 10 == 0:
-                # @todo: compute loss over all devices, not just the first device
                 name, acc = metric.get()
-                logging.info('speed: {} samples/s'.format(BATCH_SIZE / (time.time() - btic)))
-                logging.info('discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
-                         %(nd.mean(errD_list[0].as_in_context(mx.cpu())).asscalar(),
-                           nd.mean(errG_list[0].as_in_context(mx.cpu())).asscalar(), 1, iter, epoch))
+                errD_mean = sum([errD.mean().asscalar() for errD in errD_list]) / len(errD_list)
+                errG_mean = sum([errG.mean().asscalar() for errG in errG_list]) / len(errG_list)
+                msg = [
+                    f"epoch: {epoch}",
+                    f"iter: {iter}",
+                    f"d_loss: {errD_mean:0.5f}",
+                    f"g_loss: {errG_mean:0.5f}",
+                    f"acc: {acc:0.2f}",
+                    f"speed: {(BATCH_SIZE / (btoc - btic)):0.2f} samples/s"
+                ]
+                logging.info(" ".join(msg))
             iter = iter + 1
 
+        toc = time.time()
         name, acc = metric.get()
-        metric.reset()
         logging.info('\nbinary training acc at epoch %d: %s=%f' % (epoch, name, acc))
-        logging.info('time: %f' % (time.time() - tic))
+        logging.info('time: %f' % (toc - tic))
 
         # Visualize one generated image for each epoch
-        fake_img = fake_out_list[0][0]
-        visualize(fake_img)
-        plt.show()
-        netG.save_parameters(f"{timestamp}_{DATASET}_net_g.params")
-        netD.save_parameters(f"{timestamp}_{DATASET}_net_d.params")
+        if epoch % 10 == 0:
+            validate(train_data, 4, f"{timestamp} train_data epoch: {epoch}")
+            validate(val_data, 4, f"{timestamp} val_data epoch: {epoch}")
+            netG.save_parameters(f"{timestamp}_{DATASET}_net_g.params")
+            netD.save_parameters(f"{timestamp}_{DATASET}_net_d.params")
+
 
 train()
-
