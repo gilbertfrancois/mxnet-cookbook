@@ -258,36 +258,34 @@ class Discriminator(HybridBlock):
 # %%
 # -- We use history image pool to help discriminator memorize history errors instead of just comparing current real
 #    input and fake output.
-
 class ImagePool():
     def __init__(self, pool_size):
         self.pool_size = pool_size
         if self.pool_size > 0:
-            self.n_images = 0
+            self.num_imgs = 0
             self.images = []
 
     def query(self, images):
         if self.pool_size == 0:
             return images
-        ret_images = []
+        ret_imgs = []
         for i in range(images.shape[0]):
             image = nd.expand_dims(images[i], axis=0)
-            if self.n_images < self.pool_size:
-                self.n_images += 1
+            if self.num_imgs < self.pool_size:
+                self.num_imgs = self.num_imgs + 1
                 self.images.append(image)
-                ret_images.append(image)
+                ret_imgs.append(image)
             else:
                 p = nd.random_uniform(0, 1, shape=(1,)).asscalar()
                 if p > 0.5:
                     random_id = nd.random_uniform(0, self.pool_size - 1, shape=(1,)).astype(np.uint8).asscalar()
                     tmp = self.images[random_id].copy()
                     self.images[random_id] = image
-                    ret_images.append(tmp)
+                    ret_imgs.append(tmp)
                 else:
-                    ret_images.append(image)
-        ret_images = nd.concat(*ret_images, dim=0)
-        return ret_images
-
+                    ret_imgs.append(image)
+        ret_imgs = nd.concat(*ret_imgs, dim=0)
+        return ret_imgs
 
 # %%
 # -- Parameter initialisation
@@ -345,8 +343,6 @@ L1_loss = gluon.loss.L1Loss()
 
 
 # %%
-
-
 def facc(label, pred):
     pred = pred.ravel()
     label = label.ravel()
@@ -357,7 +353,7 @@ def train():
     image_pool = ImagePool(POOL_SIZE)
     metric = mx.metric.CustomMetric(facc)
 
-    timestamp = datetime.now().strftime('%Y%m%d%H%M')
+    stamp = datetime.now().strftime('%Y_%m_%d-%H_%M')
     logging.basicConfig(level=logging.DEBUG)
 
     for epoch in range(EPOCHS):
@@ -369,30 +365,27 @@ def train():
             ############################
             # (1) Update D network: maximize log(D(x, y)) + log(1 - D(x, G(x, z)))
             ###########################
-            # real_in = batch.data[0].as_in_context(mx_ctx[0])
-            # real_out = batch.data[1].as_in_context(mx_ctx[0])
-            real_in_list = gluoncv.utils.split_and_load(batch.data[0], ctx_list=mx_ctx, batch_axis=0)
-            real_out_list = gluoncv.utils.split_and_load(batch.data[1], ctx_list=mx_ctx, batch_axis=0)
+            real_in = batch.data[0].as_in_context(mx_ctx[0])
+            real_out = batch.data[1].as_in_context(mx_ctx[0])
 
-            fake_out_list = [netG(X) for X in real_in_list]
-            fake_concat_list = [image_pool.query(nd.concat(X, fake_out, dim=1)) for X in real_in_list]
+            fake_out = netG(real_in)
+            fake_concat = image_pool.query(nd.concat(real_in, fake_out, dim=1))
             with autograd.record():
                 # Train with fake image
                 # Use image pooling to utilize history images
-                output_list = [netD(fake_concat) for fake_concat in fake_concat_list]
-
-                errD_fake_list = [nd.zeros(output.shape, ctx=ctx) for ctx in mx_ctx]
-                loss_d_fake_list = [GAN_loss(output, fake_label) for output, fake_label in zip(output_list, errD_fake_list)]
-                metric.update(errD_fake_list, output_list)
+                output = netD(fake_concat)
+                fake_label = nd.zeros(output.shape, ctx=mx_ctx[0])
+                errD_fake = GAN_loss(output, fake_label)
+                metric.update([fake_label, ], [output, ])
 
                 # Train with real image
-                real_concat_list = [nd.concat(real_in, real_out, dim=1) for real_in, real_out in zip(real_in_list, real_out_list)]
-                output_list = [netD(real_concat) for real_concat in real_concat_list]
-                real_label_list = [nd.ones(output.shape, ctx=ctx) for ctx in mx_ctx]
-                errD_real_list = [GAN_loss(output, real_label) for output, real_label in zip(output_list, real_label_list)]
-                errD = (errD_real_list + loss_d_fake_list) * 0.5
+                real_concat = nd.concat(real_in, real_out, dim=1)
+                output = netD(real_concat)
+                real_label = nd.ones(output.shape, ctx=mx_ctx[0])
+                errD_real = GAN_loss(output, real_label)
+                errD = (errD_real + errD_fake) * 0.5
                 errD.backward()
-                metric.update([real_label,], [output,])
+                metric.update([real_label, ], [output, ])
 
             trainerD.step(batch.data[0].shape[0])
 
@@ -413,9 +406,10 @@ def train():
             if iter % 10 == 0:
                 name, acc = metric.get()
                 logging.info('speed: {} samples/s'.format(BATCH_SIZE / (time.time() - btic)))
-                logging.info('discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
-                         %(nd.mean(errD).asscalar(),
-                           nd.mean(errG).asscalar(), acc, iter, epoch))
+                logging.info(
+                    'discriminator loss = %f, generator loss = %f, binary training acc = %f at iter %d epoch %d'
+                    % (nd.mean(errD).asscalar(),
+                       nd.mean(errG).asscalar(), acc, iter, epoch))
             iter = iter + 1
             btic = time.time()
 
@@ -428,6 +422,7 @@ def train():
         fake_img = fake_out[0]
         visualize(fake_img)
         plt.show()
+
 
 train()
 
