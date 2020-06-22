@@ -1,39 +1,50 @@
+#    Copyright 2019 Gilbert Francois Duivesteijn
+#
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
+#
 # Image-to-Image Translation with Conditional Adversarial Networks
 # Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, Alexei A. Efros
 # https://arxiv.org/abs/1611.07004
 #
-# This script follows closely the Pixel2Pixel example from
+# This script is based on the Pixel2Pixel example from
 # https://gluon.mxnet.io/chapter14_generative-adversarial-networks/pixel2pixel.html
+#
+# New features are:
+# - Multiple GPU support
+# - New feature based loss function resulting in better and cleaner generated images.
 
-
+import logging
 import os
 import tarfile
-import numpy as np
-import matplotlib.image as mpimg
-import matplotlib.pyplot as plt
+import time
+from datetime import datetime
 
+import gluoncv
+import matplotlib.pyplot as plt
 import mxnet as mx
 import mxnet.ndarray as nd
-from mxboard import SummaryWriter
-from mxnet import gluon
+import numpy as np
 from mxnet import autograd
-from mxnet.gluon import nn, utils
+from mxnet import gluon
+from mxnet.gluon import utils
+from mxnet.gluon.nn import Activation
 from mxnet.gluon.nn import BatchNorm
 from mxnet.gluon.nn import Conv2D
 from mxnet.gluon.nn import Conv2DTranspose
-from mxnet.gluon.nn import Activation
-from mxnet.gluon.nn import Dense
 from mxnet.gluon.nn import Dropout
-from mxnet.gluon.nn import Flatten
-from mxnet.gluon.nn import MaxPool2D
-from mxnet.gluon.nn import HybridSequential
 from mxnet.gluon.nn import HybridBlock
+from mxnet.gluon.nn import HybridSequential
 from mxnet.gluon.nn import LeakyReLU
-from datetime import datetime
-import gluoncv
-import time
-import logging
-import gluoncv
 
 # %%
 # -- Settings
@@ -41,15 +52,21 @@ import gluoncv
 N_GPUS = 2
 INPUT_SHAPE = (256, 256, 3)
 EPOCHS = 101
-BATCH_SIZE_PER_DEVICE = 8
+BATCH_SIZE_PER_DEVICE = 10
 BATCH_SIZE = BATCH_SIZE_PER_DEVICE * max(N_GPUS, 1)
-LR = 0.0002
+LR = 0.0002 * N_GPUS
 BETA1 = 0.5
-LAMBDA1 = 90
-LAMBDA2 = 0.01
-POOL_SIZE = 50 // N_GPUS
+BETA2 = 0.9
+LAMBDA1 = BETA2 * 100
+LAMBDA2 = (1-BETA2) * 1e-4
+POOL_SIZE = 50 # // N_GPUS
 DATASET = "facades"
 DEBUG = False
+LOSS_FEATURE_EXTRACTOR = "VGG19"
+# LOSS_FEATURE_EXTRACTOR_LAYERS = [2, 7, 12, 19, 26]   # VGG16
+LOSS_FEATURE_EXTRACTOR_LAYERS = [0, 5, 10]
+# LOSS_FEATURE_EXTRACTOR_LAYERS = [25]
+# LOSS_FEATURE_EXTRACTOR_LAYERS = [0, 5, 10, 19, 28]   # VGG19
 
 mx_ctx = [mx.gpu(i) for i in range(N_GPUS)] if N_GPUS > 0 else [mx.cpu()]
 
@@ -351,8 +368,8 @@ def set_network(lr, beta1):
     netG(x)
     netD(nd.concat(x, x, dim=1))
 
-    # netG.hybridize()
-    # netD.hybridize()
+    netG.hybridize()
+    netD.hybridize()
 
     netG.collect_params().reset_ctx(mx_ctx)
     netD.collect_params().reset_ctx(mx_ctx)
@@ -368,38 +385,49 @@ netG, netD, trainerG, trainerD = set_network(LR, BETA1)
 # %%
 # -- VGG16 as loss function
 
-feature_extractor = gluoncv.model_zoo.get_model("VGG16", pretrained=True)
+feature_extractor = gluoncv.model_zoo.get_model(LOSS_FEATURE_EXTRACTOR, pretrained=True)
+if LOSS_FEATURE_EXTRACTOR == "VGG19":
+    feature_extractor = feature_extractor.features[:37]
+elif LOSS_FEATURE_EXTRACTOR == "VGG16":
+    feature_extractor = feature_extractor.features[:31]
+else:
+    feature_extractor = feature_extractor.features
 feature_extractor.collect_params().reset_ctx(mx_ctx)
+feature_extractor.hybridize()
 
 
 # %%
 # -- Loss
 
-def forward_vgg_features(x):
-    l1 = feature_extractor.features[:2]
-    l2 = feature_extractor.features[:7]
-    l3 = feature_extractor.features[:12]
-    l4 = feature_extractor.features[:19]
-    l5 = feature_extractor.features[:26]
+def loss_fe_normalize(x, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+    assert x.ndim == 4
+    assert x.shape[1] == 3
+    # Convert from [-1..1] to range [0..1]
+    xn = (x + 1) * 0.5
+    # Convert to normalization for pretrained imagenet
+    xn = nd.transpose(xn, axes=(0, 2, 3, 1))
+    xn = (xn - nd.array(mean, ctx=x.context, dtype=x.dtype)) / nd.array(std, ctx=x.context, dtype=x.dtype)
+    xn = nd.transpose(xn, axes=(0, 3, 1, 2))
+    return xn
+
+
+def loss_fe_forward(x):
+    xn = loss_fe_normalize(x)
     y = []
-    for layer in [l1, l2, l3]:
-       y.append(layer(x))
+    for i in range(len(feature_extractor)):
+        xn = feature_extractor[i](xn)
+        if i in LOSS_FEATURE_EXTRACTOR_LAYERS:
+            y.append(x)
     return y
 
-def feature_loss_fn(data, label):
-    # @todo: normalize input for vgg
-    y_data_list = forward_vgg_features(data)
-    y_label_list = forward_vgg_features(label)
-    loss = []
-    for i in range(len(y_data_list)):
-        _loss = nd.sum(nd.square(y_data_list[i] - y_label_list[i]), axis=[1,2,3])
-        assert _loss.shape[0] == y_data_list[i].shape[0]
-        loss.append(_loss)
 
-    fv1 = feature_extractor.features(data).reshape(data.shape[0], 512)
-    fv2 = feature_extractor.features(label).reshape(label.shape[0], 512)
-    dist = nd.sum(nd.square(fv2 - fv1), axis=1)
-    return dist
+def loss_fe_fn(data, label):
+    y_data_list = loss_fe_forward(data)
+    y_label_list = loss_fe_forward(label)
+    loss = nd.zeros(shape=data.shape[0], ctx=data.context, dtype=data.dtype)
+    for i in range(len(y_data_list)):
+        loss = loss + nd.sum(nd.square(y_data_list[i] - y_label_list[i]), axis=[1, 2, 3])
+    return loss
 
 
 GAN_loss = gluon.loss.SigmoidBinaryCrossEntropyLoss()
@@ -458,11 +486,8 @@ def train():
 
             fake_concat_list = []
             for i, ctx in enumerate(mx_ctx):
-                real_in = real_in_list[i]
-                fake_out = fake_out_list[i]
                 fake_concat = image_pool_list[i].query(nd.concat(real_in_list[i], fake_out_list[i], dim=1))
                 fake_concat_list.append(fake_concat)
-            # fake_concat_list = [image_pool.query(nd.concat(real_in, fake_out, dim=1)) for real_in, fake_out in zip(real_in_list, fake_out_list)]
             with autograd.record():
 
                 # Train with fake image
@@ -508,8 +533,9 @@ def train():
                                                                   fake_out_list):
                     loss1 = GAN_loss(output, real_label)
                     loss2 = L1_loss(real_out, fake_out)
-                    loss3 = feature_loss_fn(real_out, fake_out)
+                    loss3 = loss_fe_fn(real_out, fake_out)
                     errG_list.append(loss1 + LAMBDA1 * loss2 + LAMBDA2 * loss3)
+                    # errG_list.append(loss1 + LAMBDA1 * loss2)
                 for errG in errG_list:
                     errG.backward()
 
