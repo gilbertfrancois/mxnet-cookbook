@@ -6,6 +6,8 @@ The *Cookbook.md* and code examples are my personal notes for how to do things i
 "living" document that evolves over time. When possible, I try to have _one-to-one_ code comparisons between imperative
 programming with Gluon and symbolic programming with Module.
 
+*Note: the symbol API is deprecated in mxnet. From now on, this repo will focus on Gluon and hybridize methods.*
+
 ## Custom Loss
 
 Shows how to implement a custom loss function and custom metrics function.
@@ -53,7 +55,11 @@ API. The file `linear_regression_module.py` uses the high-level `fit()` function
 
 ## Pix2Pix
 
-Work in progress...
+This is an implementation from the method described in the paper: ["Image-to-Image Translation with Conditional Adversarial Networks", Phillip Isola, Jun-Yan Zhu, Tinghui Zhou, Alexei A. Efros](https://arxiv.org/abs/1611.07004). This script is based on the Pixel2Pixel example from [Gluon, the straight dope](https://gluon.mxnet.io/chapter14_generative-adversarial-networks/pixel2pixel.html)
+New features are:
+
+- Multiple GPU support
+- New feature based loss function resulting in better and cleaner generated images.
 
 ## Transfer Learning
 
