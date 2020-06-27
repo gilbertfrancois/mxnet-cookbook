@@ -7,7 +7,7 @@ Gilbert François Duivesteijn
 ## About
 This document describes the implementation and feed forward of the Faster R-CNN network, using the implementation of *gluon-cv* version 0.7.0. We will use the image below to detect cars, bikes, busses and persons.
 
-| <img src="/Users/gilbert/Development/git/mxnet-cookbook/_resources/bike-and-bus.jpg" style="zoom:50%;" /> |
+| <img src="../../_resources/faster_rcnn_input.jpg" style="zoom:50%;" /> |
 | :----------------------------------------------------------: |
 |                         Input image                          |
 
