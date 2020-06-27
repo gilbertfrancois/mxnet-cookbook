@@ -45,32 +45,7 @@ For this example, we use a ResNet-50 v1 with bottlenecks as backbone feature ext
 Region proposal network takes a matrix with zeros of the shape of the original input image and the feature map, given by the feature extractor. The zeros matrix is used to create valid anchor boxes. The RPN will predict for every anchor box if the box contains an object (class = 1) or background (class = 0).
 
 ```
->>> self.rpn.summary(F.zeros_like(x), feat)
---------------------------------------------------------------------------------
-        Layer (type)                                Output Shape         Param #
-================================================================================
-               Input         (1, 3, 600, 800), (1, 1024, 38, 50)               0
-RPNAnchorGenerator-1                               (1, 28500, 4)          983040
-            Conv2D-2                           (1, 1024, 38, 50)         9438208
-        Activation-3                           (1, 1024, 38, 50)               0
-            Conv2D-4                             (1, 15, 38, 50)           15375
-            Conv2D-5                             (1, 60, 38, 50)           61500
-NormalizedBoxCenterDecoder-6                       (1, 28500, 4)               0
-   BBoxClipToImage-7                               (1, 28500, 4)               0
-       RPNProposal-8                               (1, 28500, 5)               0
-               RPN-9                    (1, 300, 1), (1, 300, 4)               0
-================================================================================
-Parameters in forward computation graph, duplicate included
-   Total params: 10498123
-   Trainable params: 9515083
-   Non-trainable params: 983040
-Shared params in forward computation graph: 0
-Unique parameters in model: 10498123
---------------------------------------------------------------------------------
-
-```
-
-```
+>>> self.rpn
 RPN(
   (anchor_generator): RPNAnchorGenerator(
   
@@ -96,6 +71,33 @@ RPN(
   )
 )
 ```
+```
+>>> self.rpn.summary(F.zeros_like(x), feat)
+--------------------------------------------------------------------------------
+        Layer (type)                                Output Shape         Param #
+================================================================================
+               Input         (1, 3, 600, 800), (1, 1024, 38, 50)               0
+RPNAnchorGenerator-1                               (1, 28500, 4)          983040
+            Conv2D-2                           (1, 1024, 38, 50)         9438208
+        Activation-3                           (1, 1024, 38, 50)               0
+            Conv2D-4                             (1, 15, 38, 50)           15375
+            Conv2D-5                             (1, 60, 38, 50)           61500
+NormalizedBoxCenterDecoder-6                       (1, 28500, 4)               0
+   BBoxClipToImage-7                               (1, 28500, 4)               0
+       RPNProposal-8                               (1, 28500, 5)               0
+               RPN-9                    (1, 300, 1), (1, 300, 4)               0
+================================================================================
+Parameters in forward computation graph, duplicate included
+   Total params: 10498123
+   Trainable params: 9515083
+   Non-trainable params: 983040
+Shared params in forward computation graph: 0
+Unique parameters in model: 10498123
+--------------------------------------------------------------------------------
+
+```
+
+
 
 
 
