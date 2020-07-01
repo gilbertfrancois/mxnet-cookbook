@@ -67,7 +67,7 @@ Shows how to do transfer learning and combined transfer learning with fine tunin
 the final layer(s) and how to freeze the feature layers, if needed.
 
 Todo:
-[ ] Fix batch normalization.
-[ ] Freeze first layer in code.
+- [ ] Fix batch normalization.
+- [ ] Freeze first layer in code.
 
 
