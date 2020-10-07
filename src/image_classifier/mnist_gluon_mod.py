@@ -18,13 +18,8 @@ import time
 import mxnet as mx
 from mxnet import gluon, init, autograd
 from mxnet.gluon.data.vision import transforms
-from mxnet.gluon.nn import BatchNorm
-from mxnet.gluon.nn import Conv2D
-from mxnet.gluon.nn import Dense
-from mxnet.gluon.nn import Dropout
-from mxnet.gluon.nn import Flatten
-from mxnet.gluon.nn import MaxPool2D
-from mxnet.gluon.nn import HybridSequential
+from mxnet.gluon import nn
+import mxnet.ndarray as nd
 
 # Set logging to see some output during training
 logging.getLogger().setLevel(logging.DEBUG)
@@ -34,11 +29,12 @@ mx.random.seed(42)
 
 # Set the compute context, GPU is available otherwise CPU
 mx_ctx = mx.gpu() if mx.test_utils.list_gpus() else mx.cpu()
+#mx_ctx = mx.cpu()
 
 # %%
 # -- Constants
 
-EPOCHS = 3
+EPOCHS = 10
 BATCH_SIZE = 256
 
 # %%
@@ -55,46 +51,61 @@ transformer = transforms.Compose([
 # %%
 # -- Create a data iterator that feeds batches
 
+c
 train_data = gluon.data.DataLoader(mnist_train.transform_first(transformer),
                                    batch_size=BATCH_SIZE,
                                    shuffle=True,
-                                   num_workers=4)
+                                   num_workers=2)
 
 eval_data = gluon.data.DataLoader(mnist_valid.transform_first(transformer),
                                   batch_size=BATCH_SIZE,
-                                  num_workers=4
+                                  shuffle=False,
+                                  num_workers=2
                                   )
+
 
 # %%
 # -- Define the model
 
-net = HybridSequential()
-with net.name_scope():
-    net.add(
-        # layer 1
-        Conv2D(channels=32, kernel_size=(5, 5), padding=(5 // 2, 5 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
-        # layer 2
-        Conv2D(channels=32, kernel_size=(5, 5), padding=(5 // 2, 5 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
-        MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
-        # layer 3
-        Conv2D(channels=64, kernel_size=(3, 3), padding=(3 // 2, 3 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
-        # layer 4
-        Conv2D(channels=64, kernel_size=(3, 3), padding=(3 // 2, 3 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
-        MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
-        # layer 5
-        Flatten(),
-        Dense(1024, activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
-        # layer 6
-        Dropout(0.3),
-        Dense(10)
-    )
+class MNISTNet(nn.HybridBlock):
+    def __init__(self, **kwargs):
+        super(MNISTNet, self).__init__(**kwargs)
+        self.features = nn.HybridSequential()
+        self.features.add(
+            # layer 1
+            nn.Conv2D(channels=32, kernel_size=(5, 5), padding=(2, 2)),
+            nn.Activation("relu"),
+            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            # layer 2
+            nn.Conv2D(channels=32, kernel_size=(5, 5), padding=(2, 2)),
+            nn.Activation("relu"),
+            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            nn.MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
+            # layer 3
+            nn.Conv2D(channels=64, kernel_size=(3, 3), padding=(1, 1)),
+            nn.Activation("relu"),
+            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            # layer 4
+            nn.Conv2D(channels=64, kernel_size=(3, 3), padding=(1, 1)),
+            nn.Activation("relu"),
+            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            nn.MaxPool2D(pool_size=(2, 2), strides=(2, 2))
+        )
+        self.embeddings = nn.HybridSequential()
+        self.embeddings.add(
+            nn.Flatten(),
+            nn.Dense(128),
+            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+        )
+        self.output = nn.Dense(10)
 
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        x = self.features(x)
+        x = self.embeddings(x)
+        x = self.output(x)
+        return x
 
+net = MNISTNet()
 
 # %%
 # -- Initialize parameters
@@ -117,6 +128,12 @@ trainer = gluon.Trainer(net.collect_params(), 'Adam', {'learning_rate': 0.001})
 def acc(output, label):
     return (output.argmax(axis=1) == label.astype('float32')).mean().asscalar()
 
+# %%
+# -- test inference
+
+x = nd.ones(shape=(1, 1, 28, 28), ctx=mx_ctx)
+y = net(x)
+print(y.shape)
 
 # %%
 # -- Train
@@ -148,7 +165,6 @@ for epoch in range(EPOCHS):
         epoch, train_loss / len(train_data), train_acc / len(train_data), eval_acc / len(eval_data)))
 
 print("Elapsed time {:02f} seconds".format(time.time() - t0))
-
 
 # %%
 # -- Save parameters
