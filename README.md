@@ -66,4 +66,8 @@ New features are:
 Shows how to do transfer learning and combined transfer learning with fine tuning. Highlighted topics are how to replace
 the final layer(s) and how to freeze the feature layers, if needed.
 
+Todo:
+- [ ] Fix batch normalization.
+- [ ] Freeze first layer in code.
+
 
