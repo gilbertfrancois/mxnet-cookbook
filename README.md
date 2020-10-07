@@ -24,10 +24,6 @@ Shows how to implement a custom loss function and custom metrics function.
 This consists of a simple Deep Convolutional Generative Adversarial Network (dcgan), implemented in Gluon. As
 training data, it uses the aligned images of the Labeled Faces in the Wild dataset.
 
-## Faster R-CNN
-
-Work in progress...
-
 
 ## Image Classifier
 
