@@ -38,7 +38,7 @@ mx_ctx = mx.gpu() if mx.test_utils.list_gpus() else mx.cpu()
 # %%
 # -- Constants
 
-EPOCHS = 3
+EPOCHS = 10
 BATCH_SIZE = 256
 
 # %%
@@ -73,24 +73,23 @@ with net.name_scope():
     net.add(
         # layer 1
         Conv2D(channels=32, kernel_size=(5, 5), padding=(5 // 2, 5 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
+        BatchNorm(axis=1, momentum=0.9),
         # layer 2
         Conv2D(channels=32, kernel_size=(5, 5), padding=(5 // 2, 5 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
+        BatchNorm(axis=1, momentum=0.9),
         MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
         # layer 3
         Conv2D(channels=64, kernel_size=(3, 3), padding=(3 // 2, 3 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
+        BatchNorm(axis=1, momentum=0.9),
         # layer 4
         Conv2D(channels=64, kernel_size=(3, 3), padding=(3 // 2, 3 // 2), activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
+        BatchNorm(axis=1, momentum=0.9),
         MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
         # layer 5
         Flatten(),
-        Dense(1024, activation='relu'),
-        BatchNorm(axis=1, momentum=0.995, epsilon=0.001),
-        # layer 6
         Dropout(0.3),
+        Dense(128, activation='relu'),
+        # layer 6
         Dense(10)
     )
 

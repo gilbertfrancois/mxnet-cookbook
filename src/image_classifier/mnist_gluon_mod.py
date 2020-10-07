@@ -51,7 +51,6 @@ transformer = transforms.Compose([
 # %%
 # -- Create a data iterator that feeds batches
 
-c
 train_data = gluon.data.DataLoader(mnist_train.transform_first(transformer),
                                    batch_size=BATCH_SIZE,
                                    shuffle=True,
@@ -75,27 +74,27 @@ class MNISTNet(nn.HybridBlock):
             # layer 1
             nn.Conv2D(channels=32, kernel_size=(5, 5), padding=(2, 2)),
             nn.Activation("relu"),
-            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            nn.BatchNorm(axis=1, momentum=0.9),
             # layer 2
             nn.Conv2D(channels=32, kernel_size=(5, 5), padding=(2, 2)),
             nn.Activation("relu"),
-            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            nn.BatchNorm(axis=1, momentum=0.9),
             nn.MaxPool2D(pool_size=(2, 2), strides=(2, 2)),
             # layer 3
             nn.Conv2D(channels=64, kernel_size=(3, 3), padding=(1, 1)),
             nn.Activation("relu"),
-            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            nn.BatchNorm(axis=1, momentum=0.9),
             # layer 4
             nn.Conv2D(channels=64, kernel_size=(3, 3), padding=(1, 1)),
             nn.Activation("relu"),
-            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
+            nn.BatchNorm(axis=1, momentum=0.9),
             nn.MaxPool2D(pool_size=(2, 2), strides=(2, 2))
         )
         self.embeddings = nn.HybridSequential()
         self.embeddings.add(
             nn.Flatten(),
+            nn.Dropout(0.3),
             nn.Dense(128),
-            nn.BatchNorm(axis=1, momentum=0.9, epsilon=1e-5),
         )
         self.output = nn.Dense(10)
 
@@ -112,8 +111,8 @@ net = MNISTNet()
 
 net.initialize(init=init.Xavier(), ctx=mx_ctx)
 
-for name, param in net.collect_params().items():
-    print(name)
+# for name, param in net.collect_params().items():
+#     print(name)
 
 # %%
 # -- Define loss function and optimizer
@@ -132,8 +131,8 @@ def acc(output, label):
 # -- test inference
 
 x = nd.ones(shape=(1, 1, 28, 28), ctx=mx_ctx)
-y = net(x)
-print(y.shape)
+net.summary(x)
+net.hybridize()
 
 # %%
 # -- Train
