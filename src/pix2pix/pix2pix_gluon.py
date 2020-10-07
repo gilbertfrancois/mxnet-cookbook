@@ -5,33 +5,27 @@
 # This file follows closely the Pixel2Pixel example from
 # https://gluon.mxnet.io/chapter14_generative-adversarial-networks/pixel2pixel.html
 
+import logging
 import os
 import tarfile
-import numpy as np
-import matplotlib.image as mpimg
-import matplotlib.pyplot as plt
+import time
+from datetime import datetime
 
+import matplotlib.pyplot as plt
 import mxnet as mx
 import mxnet.ndarray as nd
-from mxboard import SummaryWriter
-from mxnet import gluon
+import numpy as np
 from mxnet import autograd
-from mxnet.gluon import nn, utils
+from mxnet import gluon
+from mxnet.gluon import utils
+from mxnet.gluon.nn import Activation
 from mxnet.gluon.nn import BatchNorm
 from mxnet.gluon.nn import Conv2D
 from mxnet.gluon.nn import Conv2DTranspose
-from mxnet.gluon.nn import Activation
-from mxnet.gluon.nn import Dense
 from mxnet.gluon.nn import Dropout
-from mxnet.gluon.nn import Flatten
-from mxnet.gluon.nn import MaxPool2D
-from mxnet.gluon.nn import HybridSequential
 from mxnet.gluon.nn import HybridBlock
+from mxnet.gluon.nn import HybridSequential
 from mxnet.gluon.nn import LeakyReLU
-from datetime import datetime
-import time
-import logging
-import gluoncv
 
 # %%
 # -- Settings
