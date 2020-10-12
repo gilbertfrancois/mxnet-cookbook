@@ -159,8 +159,8 @@ for epoch in range(EPOCHS):
             errD_real = loss_fn(output, real_label)
             metric.update([real_label, ], [output, ])
             # Train discriminator with a fake image
-            fake = netG(latent_z)
-            output = netD(fake.detach()).reshape((-1, 1))
+            fake = netG(latent_z).detach()
+            output = netD(fake).reshape((-1, 1))
             errD_fake = loss_fn(output, fake_label)
             errD = errD_real + errD_fake
             errD.backward()
