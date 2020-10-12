@@ -19,12 +19,23 @@ Shows how to implement a custom loss function and custom metrics function.
     the list of network outputs.
   - CustomMetric expects float values, not symbols. The function needs to be written with numpy arrays.
 
-## DCGAN
+## DCGAN (faces)
 
 This consists of a simple Deep Convolutional Generative Adversarial Network (dcgan), implemented in Gluon. As
 training data, it uses the aligned images of the Labeled Faces in the Wild dataset.
 
-
+## Generative Adversarial Network (GAN)
+ 
+In this folder are some basic and more advanced GAN implementations. 
+- `gan_gluon.py` Basic GAN where both the Generator and Discriminator use fully connected layers.
+- `dcgan_gluon.py` Deep convolutional GAN. Note that the initialization values are important for stable training and
+good resuls. However, this version has no protection against mode collapse.
+- `wgan_gluon.py` Deep convolutional GAN with Wasserstein Loss function and 1-Lipschitz Continuity Enforcement, to
+prevent mode collapse. _(work in progress)_
+ 
+All files have support for training on multiple GPUs and plot the output to both console/matplotlib as well to 
+TensorBoard.
+ 
 ## Image Classifier
 
 Code comparison between Module and Gluon for a simple image classifier, using a convolutional neural network. Some 
