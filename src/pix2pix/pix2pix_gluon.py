@@ -196,7 +196,7 @@ class UnetSkipUnit(HybridBlock):
                 for block in model:
                     self.model.add(block)
 
-    def hybrid_forward(self, F, x):
+    def hybrid_forward(self, F, x, *args, **kwargs):
         if self.outermost:
             return self.model(x)
         else:
