@@ -28,8 +28,8 @@ from mxnet import initializer
 logging.getLogger().setLevel(logging.DEBUG)
 
 # Hyperparameters
-NAME = "dcgan"
-N_GPUS = 2
+NAME = "wgan"
+N_GPUS = 1
 mx_ctx = [mx.gpu(i) for i in range(N_GPUS)] if N_GPUS > 0 else [mx.cpu()]
 N_WORKERS = 4
 Z_DIM = 64
@@ -38,6 +38,9 @@ PER_DEVICE_BATCH_SIZE = 128
 PER_DEVICE_LEARNING_RATE = 0.0002
 BETA1 = 0.5
 BETA2 = 0.999
+C_LAMBDA = 10
+CRIT_REPEATS = 5
+
 LEARNING_RATE = PER_DEVICE_LEARNING_RATE * max(len(mx_ctx), 1)
 BATCH_SIZE = PER_DEVICE_BATCH_SIZE * max(len(mx_ctx), 1)
 
@@ -138,21 +141,20 @@ class Generator(nn.HybridBlock):
 
 # %%
 
-class Discriminator(nn.HybridBlock):
-    def __init__(self, im_channels=1, hidden_dim=16):
-        super().__init__()
-        with self.name_scope():
-            self.disc = nn.HybridSequential()
-            self.disc.add(
-                self.get_discriminator_block(im_channels,    hidden_dim * 1),
-                self.get_discriminator_block(hidden_dim * 1, hidden_dim * 2),
-                self.get_discriminator_block(hidden_dim * 2, 1, final_layer=True),
-            )
+class Critic(nn.HybridBlock):
+    def __init__(self, im_chan=1, hidden_dim=64):
+        super(Critic, self).__init__()
+        self.crit = nn.HybridSequential()
+        self.crit.add(
+            self.make_crit_block(im_chan, hidden_dim),
+            self.make_crit_block(hidden_dim, hidden_dim * 2),
+            self.make_crit_block(hidden_dim * 2, 1, final_layer=True)
+        )
 
     def hybrid_forward(self, F, x, *args, **kwargs):
-        return self.disc(x)
+        return self.crit(x)
 
-    def get_discriminator_block(self, input_dim, output_dim, kernel_size=4, strides=2, final_layer=False):
+    def make_crit_block(self, input_dim, output_dim, kernel_size=4, strides=2, final_layer=False):
         layer = nn.HybridSequential()
         if not final_layer:
             layer.add(
@@ -166,6 +168,43 @@ class Discriminator(nn.HybridBlock):
             )
         return layer
 
+# %%
+
+
+def get_gradient(crit, real, fake, epsilon):
+    with autograd.record(train_mode=False):
+        mixed_images = epsilon * real + (1 - epsilon) * fake
+        mixed_scores = crit(mixed_images)
+    grad = autograd.grad(mixed_scores, [mixed_images], create_graph=True)
+    return grad
+
+# %%
+# UNIT TEST
+# DO NOT MODIFY THIS
+def test_get_gradient(image_shape, crit):
+    real = nd.random.randn(*image_shape, ctx=mx_ctx[0]) + 1
+    fake = nd.random.randn(*image_shape, ctx=mx_ctx[0]) - 1
+    epsilon_shape = [1 for _ in image_shape]
+    epsilon_shape[0] = image_shape[0]
+    epsilon = nd.random.randn(*epsilon_shape, ctx=mx_ctx[0])
+    # epsilon.attach_grad()
+    # real.attach_grad()
+    # fake.attach_grad()
+    with autograd.record():
+        mixed_images = epsilon * real + (1 - epsilon) * fake
+        mixed_scores = crit(mixed_images)
+    mixed_scores.backward(retain_graph=True)
+    grad = autograd.grad(mixed_scores, [mixed_images], create_graph=True)
+    # grad = get_gradient(crit, real, fake, epsilon)
+    assert tuple(grad.shape) == image_shape
+    assert grad.max() > 0
+    assert grad.min() < 0
+    return grad
+
+crit = Critic()
+crit.initialize(init=initializer.Normal(0.02), ctx=mx_ctx)
+gradient = test_get_gradient((256, 1, 28, 28), crit)
+print("Success!")
 
 # %%
 # -- Initialize parameters
@@ -174,8 +213,8 @@ gen = Generator(z_dim=Z_DIM)
 gen.initialize(init=initializer.Normal(0.02), ctx=mx_ctx)
 # %%
 
-disc = Discriminator()
-disc.initialize(init=initializer.Normal(0.02), ctx=mx_ctx)
+crit = Critic()
+crit.initialize(init=initializer.Normal(0.02), ctx=mx_ctx)
 
 # %%
 # -- Print summary before hybridizing
