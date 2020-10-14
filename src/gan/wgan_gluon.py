@@ -19,17 +19,18 @@ import matplotlib.pyplot as plt
 import mxnet as mx
 import mxnet.gluon.nn as nn
 import mxnet.ndarray as nd
+import numpy as np
 from mxboard import SummaryWriter
 from mxnet import gluon, autograd
-from mxnet.gluon.data.vision import transforms
 from mxnet import initializer
+from mxnet.gluon.data.vision import transforms
 
 # Set logging to see some output during training
 logging.getLogger().setLevel(logging.DEBUG)
 
 # Hyperparameters
 NAME = "wgan"
-N_GPUS = 1
+N_GPUS = 2
 mx_ctx = [mx.gpu(i) for i in range(N_GPUS)] if N_GPUS > 0 else [mx.cpu()]
 N_WORKERS = 4
 Z_DIM = 64
@@ -75,7 +76,8 @@ def make_grid(image_tensor, rows):
 
 # %%
 # Fix the seed
-# mx.random.seed(42)
+mx.random.seed(42)
+np.random.seed(42)
 
 # %%
 # -- Get some data to train on
@@ -85,7 +87,7 @@ mnist_valid = gluon.data.vision.datasets.MNIST(train=False)
 
 transformer = transforms.Compose([
     transforms.ToTensor(),
-    transforms.Normalize((0.5, ), (0.5, ))
+    transforms.Normalize((0.5,), (0.5,))
 ])
 
 # %%
@@ -114,23 +116,25 @@ class Generator(nn.HybridBlock):
         with self.name_scope():
             self.gen = nn.HybridSequential()
             self.gen.add(
-                self.get_generator_block(z_dim,          hidden_dim * 4, kernel_size=3, strides=2),
+                self.get_generator_block(z_dim, hidden_dim * 4, kernel_size=3, strides=2),
                 self.get_generator_block(hidden_dim * 4, hidden_dim * 2, kernel_size=4, strides=1),
                 self.get_generator_block(hidden_dim * 2, hidden_dim * 1, kernel_size=3, strides=2),
-                self.get_generator_block(hidden_dim * 1, im_channel,     kernel_size=4, strides=2, final_layer=True),
+                self.get_generator_block(hidden_dim * 1, im_channel, kernel_size=4, strides=2, final_layer=True),
             )
 
     def get_generator_block(self, input_dim, output_dim, kernel_size=3, strides=2, final_layer=False):
         layer = nn.HybridSequential()
         if not final_layer:
             layer.add(
-                nn.Conv2DTranspose(in_channels=input_dim, channels=output_dim, kernel_size=kernel_size, strides=strides, use_bias=False),
+                nn.Conv2DTranspose(in_channels=input_dim, channels=output_dim, kernel_size=kernel_size, strides=strides,
+                                   use_bias=False),
                 nn.BatchNorm(in_channels=output_dim),
                 nn.Activation(activation="relu")
             )
         else:
             layer.add(
-                nn.Conv2DTranspose(in_channels=input_dim, channels=output_dim, kernel_size=kernel_size, strides=strides, use_bias=False),
+                nn.Conv2DTranspose(in_channels=input_dim, channels=output_dim, kernel_size=kernel_size, strides=strides,
+                                   use_bias=False),
                 nn.Activation(activation="tanh")
             )
         return layer
@@ -158,7 +162,8 @@ class Critic(nn.HybridBlock):
         layer = nn.HybridSequential()
         if not final_layer:
             layer.add(
-                nn.Conv2D(in_channels=input_dim, channels=output_dim, kernel_size=kernel_size, strides=strides, use_bias=False),
+                nn.Conv2D(in_channels=input_dim, channels=output_dim, kernel_size=kernel_size, strides=strides,
+                          use_bias=False),
                 nn.BatchNorm(in_channels=output_dim),
                 nn.LeakyReLU(alpha=0.2)
             )
@@ -168,43 +173,25 @@ class Critic(nn.HybridBlock):
             )
         return layer
 
+
 # %%
 
 
 def get_gradient(crit, real, fake, epsilon):
-    with autograd.record(train_mode=False):
-        mixed_images = epsilon * real + (1 - epsilon) * fake
-        mixed_scores = crit(mixed_images)
-    grad = autograd.grad(mixed_scores, [mixed_images], create_graph=True)
-    return grad
-
-# %%
-# UNIT TEST
-# DO NOT MODIFY THIS
-def test_get_gradient(image_shape, crit):
-    real = nd.random.randn(*image_shape, ctx=mx_ctx[0]) + 1
-    fake = nd.random.randn(*image_shape, ctx=mx_ctx[0]) - 1
-    epsilon_shape = [1 for _ in image_shape]
-    epsilon_shape[0] = image_shape[0]
-    epsilon = nd.random.randn(*epsilon_shape, ctx=mx_ctx[0])
-    # epsilon.attach_grad()
-    # real.attach_grad()
-    # fake.attach_grad()
+    mixed_images = epsilon * real + (1 - epsilon) * fake
+    mixed_images.attach_grad()
     with autograd.record():
-        mixed_images = epsilon * real + (1 - epsilon) * fake
         mixed_scores = crit(mixed_images)
-    mixed_scores.backward(retain_graph=True)
-    grad = autograd.grad(mixed_scores, [mixed_images], create_graph=True)
-    # grad = get_gradient(crit, real, fake, epsilon)
-    assert tuple(grad.shape) == image_shape
-    assert grad.max() > 0
-    assert grad.min() < 0
+    grad = autograd.grad(mixed_scores, [mixed_images], retain_graph=True)[0]
     return grad
 
-crit = Critic()
-crit.initialize(init=initializer.Normal(0.02), ctx=mx_ctx)
-gradient = test_get_gradient((256, 1, 28, 28), crit)
-print("Success!")
+
+def gradient_penalty(gradient):
+    gradient = gradient.reshape(gradient.shape[0], -1)
+    gradient_norm = nd.norm(gradient, ord=2, axis=1)
+    penalty = nd.mean((gradient_norm - 1) ** 2)
+    return penalty
+
 
 # %%
 # -- Initialize parameters
@@ -225,18 +212,18 @@ gen.summary(z)
 # %%
 
 xhat = nd.random.randn(1, 1, 28, 28, ctx=mx_ctx[0])
-print(disc)
-disc.summary(xhat)
+print(crit)
+crit.summary(xhat)
 
 # %%
 # -- Hybridize and run a forward pass once to generate a symbol which will be used later
 #    for plotting the network.
 
 gen.hybridize()
-disc.hybridize()
+crit.hybridize()
 #
 gen(z)
-disc(xhat)
+crit(xhat)
 
 # %%
 # -- Define loss function and optimizer
@@ -245,39 +232,50 @@ loss_fn = gluon.loss.SigmoidBinaryCrossEntropyLoss(from_sigmoid=False)
 gen_trainer = gluon.Trainer(gen.collect_params(), 'adam', {"learning_rate": LEARNING_RATE,
                                                            "beta1": BETA1,
                                                            "beta2": BETA2})
-disc_trainer = gluon.Trainer(disc.collect_params(), 'adam', {"learning_rate": LEARNING_RATE,
-                                                            "beta1": BETA1,
-                                                            "beta2": BETA2})
+crit_trainer = gluon.Trainer(crit.collect_params(), 'adam', {"learning_rate": LEARNING_RATE,
+                                                             "beta1": BETA1,
+                                                             "beta2": BETA2})
+
+
+# %%
+
+def gen_loss_fn(crit_fake_pred):
+    gen_loss = -nd.mean(crit_fake_pred)
+    return gen_loss
+
+
+def crit_loss_fn(crit_fake_pred, crit_real_pred, gp, c_lambda):
+    crit_loss = nd.mean(crit_fake_pred) - nd.mean(crit_real_pred) + c_lambda * gp
+    return crit_loss
+
 
 # %%
 # -- Discriminator's loss function
 
-def get_disc_loss(gen, disc, loss_fn, X, batch_size, z_dim, ctx):
+def get_crit_loss(gen, crit, X, batch_size, z_dim, ctx):
     # loss from real images
-    y_pred_real = disc(X).reshape(X.shape[0], -1)
-    y_true_real = nd.ones_like(y_pred_real)
-    loss_real = loss_fn(y_pred_real, y_true_real)
     # loss from fake images
     z = nd.random.randn(batch_size, z_dim, 1, 1, ctx=ctx)
-    xhat = gen(z).detach()
-    y_pred_fake = disc(xhat).reshape(X.shape[0])
-    y_true_fake = nd.zeros_like(y_pred_fake)
-    loss_fake = loss_fn(y_pred_fake, y_true_fake)
-    # total discriminator loss
-    loss = 0.5 * (loss_real + loss_fake)
-    return loss
+    Xhat = gen(z).detach()
+    y_pred_fake = crit(Xhat).reshape(X.shape[0], -1)
+    y_pred_real = crit(X).reshape(X.shape[0], -1)
+    epsilon = np.random.rand(len(X), 1, 1, 1)
+    epsilon = nd.array(epsilon, ctx=ctx)
+    grad = get_gradient(crit, X, Xhat.detach(), epsilon)
+    gp = gradient_penalty(grad)
+    crit_loss = crit_loss_fn(y_pred_fake, y_pred_real, gp, C_LAMBDA)
+    return crit_loss
 
 
 # %%
 # -- Generator's loss function
 
-def get_gen_loss(gen, disc, loss_fn, batch_size, z_dim, ctx):
+def get_gen_loss(gen, crit, batch_size, z_dim, ctx):
     z = nd.random.randn(batch_size, z_dim, 1, 1, ctx=ctx)
     xhat = gen(z)
-    y_pred = disc(xhat).reshape(xhat.shape[0], -1)
-    y_true = nd.ones_like(y_pred)
-    loss = loss_fn(y_pred, y_true)
-    return loss
+    y_pred = crit(xhat).reshape(xhat.shape[0], -1)
+    gen_loss = gen_loss_fn(y_pred)
+    return gen_loss
 
 
 # %%
@@ -292,7 +290,7 @@ iter = 0
 with SummaryWriter(logdir=f"../../log/{timestamp}_{NAME}", flush_secs=5) as sw:
     for epoch in range(EPOCHS):
         gen_train_loss = 0
-        disc_train_loss = 0
+        crit_train_loss = 0
         # Forward pass and update weights
         tic_epoch = time.time()
         for i, batch in enumerate(train_data):
@@ -301,29 +299,29 @@ with SummaryWriter(logdir=f"../../log/{timestamp}_{NAME}", flush_secs=5) as sw:
             data = gluon.utils.split_and_load(batch[0], ctx_list=mx_ctx, batch_axis=0, even_split=False)
             # label = gluon.utils.split_and_load(batch[1], ctx_list=mx_ctx, batch_axis=0, even_split=False)
 
-            # Update discriminator
-            with autograd.record():
-                disc_loss_list = [get_disc_loss(gen, disc, loss_fn, X, PER_DEVICE_BATCH_SIZE, Z_DIM, mx_ctx[i])
-                                  for i, X in enumerate(data)]
-            for disc_loss in disc_loss_list:
-                disc_loss.backward()
-            disc_trainer.step(batch_size=BATCH_SIZE)
-            disc_train_loss += sum([loss.mean().asscalar() for loss in disc_loss_list]) / len(disc_loss_list)
+            # Update critic
+            for _ in range(CRIT_REPEATS):
+                with autograd.record():
+                    crit_loss_list = [get_crit_loss(gen, crit, X, PER_DEVICE_BATCH_SIZE, Z_DIM, mx_ctx[i])
+                                      for i, X in enumerate(data)]
+                for crit_loss in crit_loss_list:
+                    crit_loss.backward()
+                crit_trainer.step(batch_size=BATCH_SIZE)
+                crit_train_loss += sum([loss.mean().asscalar() for loss in crit_loss_list]) / len(crit_loss_list) / CRIT_REPEATS
 
             # Update generator. Do multiple steps to keep up with the discriminator.
-            for _ in range(1):
-                with autograd.record():
-                    gen_loss_list = [get_gen_loss(gen, disc, loss_fn, PER_DEVICE_BATCH_SIZE, Z_DIM, mx_ctx[i])
-                                     for i, X in enumerate(data)]
+            with autograd.record():
+                gen_loss_list = [get_gen_loss(gen, crit, PER_DEVICE_BATCH_SIZE, Z_DIM, mx_ctx[i])
+                                 for i, X in enumerate(data)]
 
-                for gen_loss in gen_loss_list:
-                    gen_loss.backward()
-                gen_trainer.step(batch_size=BATCH_SIZE)
-                gen_train_loss += sum([loss.mean().asscalar() for loss in gen_loss_list]) / len(gen_loss_list) / 2
+            for gen_loss in gen_loss_list:
+                gen_loss.backward()
+            gen_trainer.step(batch_size=BATCH_SIZE)
+            gen_train_loss += sum([loss.mean().asscalar() for loss in gen_loss_list]) / len(gen_loss_list)
 
             toc_batch = time.time()
 
-            if iter % 2000 == 0:
+            if iter % 500 == 0:
                 print("Plotting...")
                 with autograd.record(False):
                     xhat = gen(nd.random.randn(25, Z_DIM, 1, 1, ctx=mx_ctx[0]))
@@ -338,14 +336,14 @@ with SummaryWriter(logdir=f"../../log/{timestamp}_{NAME}", flush_secs=5) as sw:
         # Epoch statistics
         toc_epoch = time.time()
         chrono_epoch = toc_epoch - tic_epoch
-        disc_train_loss /= len(train_data)
+        crit_train_loss /= len(train_data)
         gen_train_loss /= len(train_data)
         samples_per_sec = len(mnist_train) / chrono_epoch
 
         # Print info to console
         msg = f"epoch: {epoch} " \
               f"iter: {iter} " \
-              f"disc_train_loss: {disc_train_loss:0.3f} " \
+              f"disc_train_loss: {crit_train_loss:0.3f} " \
               f"gen_train_loss: {gen_train_loss:0.3f} " \
               f"lr: {LEARNING_RATE} " \
               f"samples/s: {samples_per_sec:0.2f} "
@@ -353,7 +351,7 @@ with SummaryWriter(logdir=f"../../log/{timestamp}_{NAME}", flush_secs=5) as sw:
 
         # Add some values to mxboard
         sw.add_scalar("Loss", ("gen_train_loss", gen_train_loss), global_step=epoch)
-        sw.add_scalar("Loss", ("disc_train_loss", disc_train_loss), global_step=epoch)
+        sw.add_scalar("Loss", ("disc_train_loss", crit_train_loss), global_step=epoch)
 
 print("=== Total training time: {:02f} seconds".format(time.time() - t0))
 
@@ -361,4 +359,4 @@ print("=== Total training time: {:02f} seconds".format(time.time() - t0))
 # -- Save parameters
 
 gen.save_parameters(f"{param_file_prefix}_gen_final.params")
-disc.save_parameters(f"{param_file_prefix}_disc_final.params")
+crit.save_parameters(f"{param_file_prefix}_disc_final.params")
