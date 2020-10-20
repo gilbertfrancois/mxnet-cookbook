@@ -38,7 +38,6 @@ PER_DEVICE_LEARNING_RATE = 1.0e-5
 LEARNING_RATE = PER_DEVICE_LEARNING_RATE * max(len(mx_ctx), 1)
 BATCH_SIZE = PER_DEVICE_BATCH_SIZE * max(len(mx_ctx), 1)
 
-
 # %%
 # -- Helper function for visualization
 

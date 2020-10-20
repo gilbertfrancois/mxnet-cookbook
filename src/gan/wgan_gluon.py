@@ -111,7 +111,7 @@ eval_data = gluon.data.DataLoader(mnist_valid.transform_first(transformer),
 
 class Generator(nn.HybridBlock):
     def __init__(self, z_dim=10, im_channel=1, hidden_dim=64):
-        super().__init__()
+        super(Generator, self).__init__()
         self.z_dim = z_dim
         with self.name_scope():
             self.gen = nn.HybridSequential()
@@ -180,9 +180,10 @@ class Critic(nn.HybridBlock):
 def get_gradient(crit, real, fake, epsilon):
     mixed_images = epsilon * real + (1 - epsilon) * fake
     mixed_images.attach_grad()
-    with autograd.record():
-        mixed_scores = crit(mixed_images)
-    grad = autograd.grad(mixed_scores, [mixed_images], retain_graph=True)[0]
+    # with autograd.record():
+    mixed_scores = crit(mixed_images)
+    grad = autograd.grad(mixed_scores, [mixed_images], retain_graph=True, create_graph=True,
+                         head_grads=nd.ones_like(mixed_scores))[0]
     return grad
 
 
@@ -219,8 +220,8 @@ crit.summary(xhat)
 # -- Hybridize and run a forward pass once to generate a symbol which will be used later
 #    for plotting the network.
 
-gen.hybridize()
-crit.hybridize()
+# gen.hybridize()
+# crit.hybridize()
 #
 gen(z)
 crit(xhat)
@@ -252,16 +253,21 @@ def crit_loss_fn(crit_fake_pred, crit_real_pred, gp, c_lambda):
 # %%
 # -- Discriminator's loss function
 
-def get_crit_loss(gen, crit, X, batch_size, z_dim, ctx):
-    # loss from real images
-    # loss from fake images
+def get_crit_loss(gen, crit, real, batch_size, z_dim, ctx):
     z = nd.random.randn(batch_size, z_dim, 1, 1, ctx=ctx)
-    Xhat = gen(z).detach()
-    y_pred_fake = crit(Xhat).reshape(X.shape[0], -1)
-    y_pred_real = crit(X).reshape(X.shape[0], -1)
-    epsilon = np.random.rand(len(X), 1, 1, 1)
+    fake = gen(z).detach()
+    y_pred_fake = crit(fake).reshape(real.shape[0], -1)
+    y_pred_real = crit(real).reshape(real.shape[0], -1)
+    epsilon = np.random.rand(len(real), 1, 1, 1)
     epsilon = nd.array(epsilon, ctx=ctx)
-    grad = get_gradient(crit, X, Xhat.detach(), epsilon)
+    # grad = get_gradient(crit, X, Xhat.detach(), epsilon)
+
+    mixed_images = epsilon * real + (1 - epsilon) * fake
+    mixed_images.attach_grad()
+    # with autograd.record():
+    mixed_scores = crit(mixed_images)
+    grad = autograd.grad(mixed_scores, [mixed_images], retain_graph=True, create_graph=True,
+                         head_grads=nd.ones_like(mixed_scores))[0]
     gp = gradient_penalty(grad)
     crit_loss = crit_loss_fn(y_pred_fake, y_pred_real, gp, C_LAMBDA)
     return crit_loss
