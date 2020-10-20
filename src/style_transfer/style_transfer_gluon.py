@@ -31,26 +31,37 @@ import matplotlib.pyplot as plt
 npx.set_np()
 
 IMAGE_SIZE = (225, 150)
-N_EPOCHS = 500
-LR = 0.01
-LR_DECAY_EPOCH = 200
-ROOT_FOLDER = os.path.expanduser("~/Development/git/mxnet-cookbook")
+N_EPOCHS = 2000
 RGB_MEAN = np.array([0.485, 0.456, 0.406])
 RGB_STD = np.array([0.229, 0.224, 0.225])
 STYLE_LAYERS = [0, 5, 10, 19, 28]
 CONTENT_LAYERS = [25]
+LR = 0.8
+LR_DECAY_EPOCH = 300
 CONTENT_WEIGHT = 1
-STYLE_WEIGHT = 1e3
-TV_WEIGHT = 10
+STYLE_WEIGHT = 1e5
+TV_WEIGHT = 50
 
 mx_ctx = mx.gpu(0)
+
+def find_root_folder(project_folder):
+    folder_list = os.getcwd().split(sep="/")
+    root_folder_list = []
+    for folder in folder_list:
+        if folder == project_folder:
+            break
+        else:
+            root_folder_list.append(folder)
+    root_folder_list.append(project_folder)
+    return "/" + os.path.join(*root_folder_list)
+
+ROOT_FOLDER = find_root_folder("mxnet-cookbook")
 
 # %%
 # -- Load images
 
-content_image = image.imread(os.path.join(ROOT_FOLDER, "_resources", "paris.png"))
-style_image = image.imread(os.path.join(ROOT_FOLDER, "_resources", "starry_night.png"))
-
+content_image = image.imread(os.path.join(ROOT_FOLDER, "_resources", "IMG_3855.jpeg"))
+style_image = image.imread(os.path.join(ROOT_FOLDER, "_resources", "Famous-Pablo-Picasso-Paintings-and-Art-Pieces21.jpg"))
 # %%
 # -- Show images
 
@@ -183,7 +194,7 @@ def train(X, contents_Y, styles_Y, ctx, lr, num_epochs, lr_decay_epoch):
         trainer.step(1)
         npx.waitall()
         if epoch % lr_decay_epoch == 0:
-            trainer.set_learning_rate(trainer.learning_rate * 0.1)
+            trainer.set_learning_rate(trainer.learning_rate * 0.3)
         if epoch % 100 == 0:
             msg = [
                 f"Epoch: {epoch}",
