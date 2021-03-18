@@ -91,21 +91,21 @@ class StyleTransferGF:
         for i in range(max(self.content_layers + self.style_layers) + 1):
             self.net.add(pretrained_net.features[i])
 
-    def smooth(self, src: mx.numpy.ndarray, d: int, sigma_color: int, sigma_space: int):
+    def smooth(self, src: np.ndarray, d: int, sigma_color: int, sigma_space: int):
         img = image.imresize(src, *self.IMAGE_SIZE)
         dst = cv.bilateralFilter(img.asnumpy(), d, sigma_color, sigma_space)
         dst = self.as_nd_np(dst)
         return dst
 
-    def as_nd_np(self, img):
+    def as_nd_np(self, img: np.ndarray):
         return mx.nd.array(img, dtype=np.int32).as_np_ndarray()
 
-    def preprocess(self, img):
+    def preprocess(self, img: np.ndarray):
         img = image.imresize(img, *self.IMAGE_SIZE)
         img = (img.astype('float32') / 255 - self.RGB_MEAN) / self.RGB_STD
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)
 
-    def postprocess(self, img):
+    def postprocess(self, img: np.ndarray):
         img = img[0].as_in_ctx(self.RGB_STD.ctx)
         return (img.transpose(1, 2, 0) * self.RGB_STD + self.RGB_MEAN).clip(0, 1)
 
@@ -220,15 +220,10 @@ for content_weight in content_weight_list:
             ROOT_FOLDER = find_root_folder("mxnet-cookbook")
             content_image_filename = os.path.join(ROOT_FOLDER, "_resources", "IMG_5226.jpeg")
             style_image_filename = os.path.join(ROOT_FOLDER, "_resources", "cat1.jpg")
-            # scales = ((200, 150), (300, 225), (400, 300), (600, 450), (800, 600))
-            # scales = ((200, 150), (400, 300), (200, 150), (400, 300), (800, 600), (400, 300), (800, 600))
             scales = ((200, 150), (283, 212), (400, 300), (566, 424), (800, 600))
             lr_list = (0.7, 0.6, 0.5, 0.5, 0.5)
-            # lr_list = (0.7, 0.5, 0.3)
 
             original_image = cv.cvtColor(cv.imread(content_image_filename), cv.COLOR_BGR2RGB)
-            # cartonifier = Cartonifier()
-            # original_image = cartonifier.process(original_image, 192)
             content_image = cv.resize(original_image, scales[0], cv.INTER_CUBIC)
 
             index = 0
@@ -247,10 +242,6 @@ for content_weight in content_weight_list:
                 style_transfer_gf = StyleTransferGF(content_image, style_image_filename, out_image_filepath, scale,
                                                     content_weight=content_weight, style_weight=style_weight, tv_weight=tv_weight)
                 content_image = style_transfer_gf.train()
-                # plt.figure()
-                # plt.imshow(content_image)
-                # plt.title(f"{timestamp} {scale}")
-                # plt.show()
                 style_transfer_gf = None
                 del style_transfer_gf
                 time.sleep(3)
