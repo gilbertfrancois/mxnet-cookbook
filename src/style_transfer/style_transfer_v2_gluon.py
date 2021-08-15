@@ -26,6 +26,7 @@ from mxnet import image
 from mxnet import init
 from mxnet import np, npx
 from mxnet.gluon import nn
+import glob
 import matplotlib.pyplot as plt
 from datetime import timedelta
 from cartonifier import Cartonifier
@@ -58,8 +59,8 @@ class GeneratedImage(nn.Block):
 
 
 class StyleTransferGF:
-    def __init__(self, content_image_filepath, style_image_filepath, out_image_filepath, image_size, content_weight=1.0,
-                 style_weight=1.0e4, tv_weight=50.0, lr=0.1):
+    def __init__(self, content_image, style_image, image_size, content_weight=1.0, style_weight=1.0e4, tv_weight=10.0,
+                 lr=0.1, out_image_filepath=None):
         super(StyleTransferGF, self).__init__()
         self.IMAGE_SIZE = image_size
         self.N_EPOCHS = 600
@@ -76,14 +77,18 @@ class StyleTransferGF:
         self.out_image_filepath = out_image_filepath
 
         # Load and prepare images
-        if isinstance(content_image_filepath, numpy.ndarray):
-            self.content_image = self.as_nd_np(content_image_filepath)
-        elif isinstance(content_image_filepath, str):
-            self.content_image = image.imread(content_image_filepath)
+        if isinstance(content_image, numpy.ndarray):
+            self.content_image = self.as_nd_np(content_image)
+        elif isinstance(content_image, str):
+            self.content_image = image.imread(content_image)
         else:
             raise TypeError("Only numpy array or str are supported.")
-        # self.content_image = self.smooth(content_image, 25, 75, 75)
-        self.style_image = image.imread(style_image_filepath)
+        if isinstance(style_image, numpy.ndarray):
+            self.style_image = self.as_nd_np(style_image)
+        elif isinstance(style_image, str):
+            self.style_image = image.imread(style_image)
+        else:
+            raise TypeError("Only numpy array or str are supported.")
 
         # Load and prepare feature extractor
         pretrained_net = gluon.model_zoo.vision.vgg19(pretrained=True)
@@ -184,6 +189,7 @@ class StyleTransferGF:
                 trainer.set_learning_rate(trainer.learning_rate * 0.3)
             if epoch % 100 == 0:
                 msg = [
+                    f"Size: {self.IMAGE_SIZE}",
                     f"Epoch: {epoch}",
                     f"contents_l: {float(sum(contents_l)):0.3f}",
                     f"style_l: {float(sum(styles_l)):0.3f}",
@@ -196,75 +202,102 @@ class StyleTransferGF:
                 # plt.show()
         out = self.postprocess(x).asnumpy()
         out = (out * 255).astype(numpy.uint8)
-        cv.imwrite(self.out_image_filepath, cv.cvtColor(out, cv.COLOR_RGB2BGR))
+        if self.out_image_filepath is not None:
+            cv.imwrite(self.out_image_filepath, cv.cvtColor(out, cv.COLOR_RGB2BGR))
         return out
 
 
 # %%
 # -- Train (continued)
 
-content_weight_list = [1.0]
-style_weight_list = [1e4]
-tv_weight_list = [10]
+def get_output_filepath(content_image_filepath, style_image_filepath, cw, sw, tw, output_folder):
+    filename_noext1 = os.path.splitext(os.path.basename(content_image_filepath))[0]
+    filename_noext2 = os.path.splitext(os.path.basename(style_image_filepath))[0]
+    out = f"{filename_noext1}_{filename_noext2}_{cw}_{sw}_{tw}.png"
+    out = os.path.join(output_folder, out)
+    return out
 
-for content_weight in content_weight_list:
+
+def process_image(content_image_filepath, style_image_filepath, content_weight, style_weight, tv_weight, output_folder,
+                  timestamp):
+    print(f"[ ] Processing {os.path.basename(content_image_filepath)} with settings: {content_weight} {style_weight} {tv_weight}")
+    alpha = 0.90
+    scales = ((200, 150), (283, 212), (400, 300), (566, 424), (800, 600))
+    lr_list = (0.7, 0.6, 0.5, 0.5, 0.5)
+    # Prepare content image.
+    original_image = cv.cvtColor(cv.imread(content_image_filepath), cv.COLOR_BGR2RGB)
+    shape = original_image.shape
+    ratio = shape[1] / shape[0]
+    if ratio < 1:
+        original_image = cv.rotate(original_image, cv.ROTATE_90_CLOCKWISE)
+        is_rotated = True
+    else:
+        is_rotated = False
+    content_image = cv.resize(original_image, scales[0], cv.INTER_CUBIC)
+    # Prepare style image.
+    original_style_image = cv.cvtColor(cv.imread(style_image_filepath), cv.COLOR_BGR2RGB)
+    shape = original_style_image.shape
+    ratio = shape[1] / shape[0]
+    if ratio < 1:
+        original_style_image = cv.rotate(original_style_image, cv.ROTATE_90_CLOCKWISE)
+    style_image = cv.resize(original_style_image, scales[0], cv.INTER_CUBIC)
+
+
+    index = 0
+    for index, scale in enumerate(scales):
+        if index > 0:
+            src1 = cv.resize(original_image, dsize=scale, interpolation=cv.INTER_CUBIC)
+            src2 = cv.resize(content_image, dsize=scale, interpolation=cv.INTER_CUBIC)
+            src2 = cv.medianBlur(src2, ksize=3)
+            src3 = cv.addWeighted(src2, alpha, src1, 1.0 - alpha, 0)
+            content_image = src3
+            style_image = cv.resize(original_style_image, dsize=scale, interpolation=cv.INTER_CUBIC)
+        output_filepath = None
+        lr = lr_list[index]
+        style_transfer_gf = StyleTransferGF(content_image, style_image, scale, content_weight=content_weight,
+                                            style_weight=style_weight, tv_weight=tv_weight,
+                                            out_image_filepath=output_filepath)
+        content_image = style_transfer_gf.train()
+        del style_transfer_gf
+        time.sleep(3)
+    if is_rotated:
+        content_image = cv.rotate(content_image, cv.ROTATE_90_COUNTERCLOCKWISE)
+    output_filepath = get_output_filepath(content_image_filepath, style_image_filepath, content_weight, style_weight, tv_weight, output_folder)
+    cv.imwrite(output_filepath, cv.cvtColor(content_image, cv.COLOR_RGB2BGR))
+
+
+def main():
+    root_folder = find_root_folder("mxnet-cookbook")
+    output_folder = os.path.join(root_folder, "data", "output")
+    os.makedirs(output_folder, exist_ok=True)
+    timestamp = str(int(time.time()))
+
+    content_weight_list = [1.0]
+    style_weight_list = [1e4]
+    tv_weight_list = [10]
+
+    content_image_filepath_list = sorted(glob.glob(os.path.join(root_folder, "data", "input", "IMG_20201029*")))
+    content_image_filepath_list = [content_image_filepath_list[0]]
+
+    style_image_filepath_list = sorted([
+        os.path.join(root_folder, "data", "style_transfer", "picasso_00009.jpg")
+    ])
+
+
     for style_weight in style_weight_list:
-        for tv_weight in tv_weight_list:
-            tic = time.time()
-            print(f"[ ] Starting processing with settings: {content_weight} {style_weight} {tv_weight}")
-            alpha = 0.8
-            kernel_size = 3
-            sigma_color = 75
-            sigma_space = 75
-            timestamp = str(int(time.time()))
-            ROOT_FOLDER = find_root_folder("mxnet-cookbook")
-            content_image_filename = os.path.join(ROOT_FOLDER, "_resources", "IMG_5226.jpeg")
-            style_image_filename = os.path.join(ROOT_FOLDER, "_resources", "cat1.jpg")
-            # scales = ((200, 150), (300, 225), (400, 300), (600, 450), (800, 600))
-            # scales = ((200, 150), (400, 300), (200, 150), (400, 300), (800, 600), (400, 300), (800, 600))
-            scales = ((200, 150), (283, 212), (400, 300), (566, 424), (800, 600))
-            lr_list = (0.7, 0.6, 0.5, 0.5, 0.5)
-            # lr_list = (0.7, 0.5, 0.3)
+        for content_weight in content_weight_list:
+            for tv_weight in tv_weight_list:
+                for content_image_filename in content_image_filepath_list:
+                    for style_image_filename in style_image_filepath_list:
+                        tic = time.time()
+                        if not os.path.exists(style_image_filename):
+                            raise FileNotFoundError(f"Cannot find {style_image_filename}")
+                        if not os.path.exists(content_image_filename):
+                            raise FileNotFoundError(f"Cannot find {content_image_filename}")
+                        process_image(content_image_filename, style_image_filename, content_weight, style_weight,
+                                      tv_weight, output_folder, timestamp)
+                        toc = time.time()
+                        print(f"Elapsed time: f{timedelta(seconds=(toc - tic))}")
 
-            original_image = cv.cvtColor(cv.imread(content_image_filename), cv.COLOR_BGR2RGB)
-            # cartonifier = Cartonifier()
-            # original_image = cartonifier.process(original_image, 192)
-            content_image = cv.resize(original_image, scales[0], cv.INTER_CUBIC)
-
-            index = 0
-            for index, scale in enumerate(scales):
-                if index > 0:
-                    src1 = cv.resize(original_image, dsize=scale, interpolation=cv.INTER_CUBIC)
-                    # src1 = cartonifier.process(src1, 255)
-                    # src1 = cv.bilateralFilter(src1, kernel_size, sigma_color, sigma_space)
-                    src2 = cv.resize(content_image, dsize=scale, interpolation=cv.INTER_CUBIC)
-                    src2 = cv.medianBlur(src2, ksize=3)
-                    src3 = cv.addWeighted(src2, alpha, src1, 1.0 - alpha, 0)
-                    content_image = src3
-                out_image_filepath = os.path.join(ROOT_FOLDER, "_resources", f"{timestamp}_out{index}_{content_weight}_{style_weight}_{tv_weight}.png")
-                print(out_image_filepath)
-                lr = lr_list[index]
-                style_transfer_gf = StyleTransferGF(content_image, style_image_filename, out_image_filepath, scale,
-                                                    content_weight=content_weight, style_weight=style_weight, tv_weight=tv_weight)
-                content_image = style_transfer_gf.train()
-                # plt.figure()
-                # plt.imshow(content_image)
-                # plt.title(f"{timestamp} {scale}")
-                # plt.show()
-                style_transfer_gf = None
-                del style_transfer_gf
-                time.sleep(3)
-
-            # content_image = cv.imread(os.path.join(ROOT_FOLDER, "_resources", "1602971485_out2.png"))
-            # content_image = cv.cvtColor(content_image, cv.COLOR_BGR2RGB)
-            tmp1 = cv.medianBlur(content_image, ksize=3)
-            tmp2 = cv.medianBlur(content_image, ksize=5)
-            kernel = numpy.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
-            tmp2 = cv.filter2D(tmp2, -1, kernel)
-            tmp3 = cv.addWeighted(tmp1, 0.9, tmp2, 0.1, 0)
-            out_image_filepath = os.path.join(ROOT_FOLDER, "_resources", f"{timestamp}_out{index + 1}_{content_weight}_{style_weight}_{tv_weight}.png")
-            cv.imwrite(out_image_filepath, cv.cvtColor(tmp3, cv.COLOR_RGB2BGR))
-            toc = time.time()
-            print(f"Elapsed time: f{timedelta(seconds=(toc-tic))}")
-
-
+if __name__ == '__main__':
+    main()
