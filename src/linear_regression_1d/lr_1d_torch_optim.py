@@ -16,8 +16,9 @@ import torch
 
 # %%
 # Helper function 
-def log_info(W, loss):
-    print(f"Epoch: {epoch}, Weight: {W.item():.3f}, Loss: {loss:.3f}, dW: {W.grad.item():.3f}")
+def log_info(net, loss):
+    [w] = net.parameters()
+    print(f"Epoch: {epoch}, Weight: {w[0].item():.3f}, Loss: {loss.item():.3f}, dW: {w.grad.item():.3f}")
 
 # %% 
 # Configuration
@@ -32,39 +33,53 @@ LR = 0.005
 x = torch.tensor([[-2], [-1], [0], [1], [2], [3], [4], [5], [6], [7], [8]], dtype=torch.float32)
 y = 2*x
 
-# %%
-# Trainable parameter
-W = torch.tensor([[0.001]], dtype=torch.float32, requires_grad=True)
+n_samples, n_features = x.shape
+in_features = n_features
+out_features = n_features
 
-# %% 
-# Network as a forward function
-def forward(x):
-    return torch.matmul(x, W)
+# %%
+# Network with 1 trainable parameter
+class LinearRegression(torch.nn.Module):
+
+    def __init__(self, in_features, out_features):
+        super(LinearRegression, self).__init__()
+        # Linear => xW + b, where b=0
+        self.layer = torch.nn.Linear(in_features, out_features, bias=False)
+        # Init weight
+        self.layer.weight.data.fill_(0.001)
+
+    def forward(self, x):
+        return self.layer(x)
+
+net = LinearRegression(in_features, out_features)
 
 # %% 
 # Loss function: MSE
-def loss_fn(y_pred, y):
-    return torch.mean(torch.square(y_pred - y))
+loss_fn = torch.nn.MSELoss()
+
+# %%
+# Optimizer, Stochastic Gradient Decent
+optimizer = torch.optim.SGD(net.parameters(), lr=LR)
 
 # %%
 # Training loop
 for epoch in range(EPOCHS):
     # Compute f(x) = Wx
-    y_pred = forward(x)
+    y_pred = net(x)
     # Compute loss
     loss = loss_fn(y_pred, y) 
     # Compute dL/dW 
     loss.backward()
     # Show intermediate values to screen
-    log_info(W, loss)
+    log_info(net, loss)
     # Update weights 
-    with torch.no_grad():
-        W -= LR * W.grad
-        # Reset dW for the next iteration
-        W.grad.zero_()
+    optimizer.step()
+    # Reset all gradients for the next iteration
+    optimizer.zero_grad()
 
 # %%
 # Test the model: f(5) = 2*5 = 10
-x_test = torch.tensor([[5]], dtype=torch.float32)
 with torch.no_grad():
-    print(f"f(5) = {forward(x_test)}")
+    x_test = torch.tensor([[5]], dtype=torch.float32)
+    print(f"f(5) = {net(x_test)}")
+
