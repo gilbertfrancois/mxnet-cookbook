@@ -276,12 +276,10 @@ def main():
     style_weight_list = [1e4]
     tv_weight_list = [10]
 
-    content_image_filepath_list = sorted(glob.glob(os.path.join(root_folder, "data", "input", "IMG_20201029*")))
+    content_image_filepath_list = sorted(glob.glob(os.path.join(root_folder, "data", "input", "IMG_*")))
     content_image_filepath_list = [content_image_filepath_list[0]]
 
-    style_image_filepath_list = sorted([
-        os.path.join(root_folder, "data", "style_transfer", "picasso_00009.jpg")
-    ])
+    style_image_filepath_list = sorted(glob.glob(os.path.join(root_folder, "data", "style_transfer", "*.jpeg")))
 
 
     for style_weight in style_weight_list:
