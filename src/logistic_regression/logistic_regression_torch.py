@@ -24,8 +24,8 @@ from sklearn.model_selection import train_test_split
 def log_info(net, loss):
     with torch.no_grad():
         [w, b] = net.parameters()
-        print(f"Epoch: {epoch}, Weight: {w[0].mean():.3f}+-{w[0].std():.3f}, Loss: {loss.item():.3f}, " \
-              f"dW: {w.grad.mean():.3f}, learning_rate: {LR:.3e}")
+        print(f"Epoch: {epoch}, W: {w[0].mean():.3f}±{w[0].std():.3f}, b: {b[0].mean():.3f}, " \
+              f"Loss: {loss.item():.3f}, dW: {w.grad.mean():.3f}±{w.grad.std():.3f} learning_rate: {LR:.3e}")
 
 # %% 
 # Configuration
@@ -54,14 +54,15 @@ in_features = X.shape[1]
 out_features = 1
 
 # %%
-# Network with 1 trainable parameter
+# Network with 1 trainable layer.
 class LogisticRegression(nn.Module):
 
     def __init__(self, in_features, out_features=1):
         super(LogisticRegression, self).__init__()
         # Linear => xW + b, where b=0
         self.layer = nn.Linear(in_features, out_features)
-        self.layer.weight.data.fill_(0.001)
+        self.layer.weight.data.fill_(0.01)
+        self.layer.bias.data.fill_(0.0)
         
     def forward(self, x):
         x = self.layer(x)
