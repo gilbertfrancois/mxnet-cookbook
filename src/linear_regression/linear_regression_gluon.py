@@ -107,7 +107,8 @@ print("Elapsed time: {:0.2f} seconds".format(time.time() - t0))
 # -- Plot training loss on a log scale
 
 plt.plot(np.log10(loss_sequence))
-plt.show()
+plt.savefig("lr_gluon_loss.png")
+# plt.show()
 
 # %%
 # -- Predict y for the test data and plot the result as a point cloud
@@ -117,7 +118,8 @@ y_pred = net(X_test)
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 ax.scatter(X_test[:, 0].asnumpy(), X_test[:, 1].asnumpy(), y_pred.asnumpy())
-fig.show()
+plt.savefig("lr_gluon_test.png")
+# fig.show()
 
 # %%
 # -- Take a peak into the trained weights and bias
