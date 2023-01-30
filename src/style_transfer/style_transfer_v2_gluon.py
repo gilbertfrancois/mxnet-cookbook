@@ -15,27 +15,42 @@
 # Based on the explanation in the book:
 # "Dive into deep learning", A. Zhang, Z.C. Lipton, M. Li, A.J. Smola
 
-import os
-import time
-import mxnet as mx
+import argparse
 import cv2 as cv
+import glob
+import mxnet as mx
 import numpy
-from mxnet import gluon
+import os
+import sys
+import time
 from mxnet import autograd
+from mxnet import gluon
 from mxnet import image
 from mxnet import init
 from mxnet import np, npx
 from mxnet.gluon import nn
-import glob
-import matplotlib.pyplot as plt
 from datetime import timedelta
-from cartonifier import Cartonifier
 
 # %%
 # -- Settings
 
 npx.set_np()
 
+def parse_arguments(argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--input-path", type=str, required=True, 
+            help="Input path to an image or folder containing multiple images.")
+    parser.add_argument("-o", "--output-path", type=str, required=True, 
+            help="Input path to an output folder.")
+    parser.add_argument("-s", "--style-path", type=str, required=True, 
+            help="Path to image or folder, containing the style.")
+    # parser.add_argument("--content-weight", type=str, required=False, default="1.0",
+    #         help="Content weight, optional, default=1.0.")
+    # parser.add_argument("--style-weight", type=str, required=False, default="10000.0",
+    #         help="Style weight, optional, default=10000.0.")
+    # parser.add_argument("tv_weight", type=str, required=False, default="10.0",
+    #         help="TV weight, optional, default=10.0.")
+    return parser.parse_args(argv)
 
 def find_root_folder(project_folder):
     folder_list = os.getcwd().split(sep="/")
@@ -266,21 +281,29 @@ def process_image(content_image_filepath, style_image_filepath, content_weight, 
     cv.imwrite(output_filepath, cv.cvtColor(content_image, cv.COLOR_RGB2BGR))
 
 
-def main():
+def main(args):
     root_folder = find_root_folder("mxnet-cookbook")
-    output_folder = os.path.join(root_folder, "data", "output")
+    print(args)
+    output_folder = args.output_path
+    content_folder = args.input_path
+    style_transfer_folder = args.style_path
+
     os.makedirs(output_folder, exist_ok=True)
     timestamp = str(int(time.time()))
+    if not os.path.exists(content_folder):
+        raise FileNotFoundError(f"Style transfer folder {style_transfer_folder} does not exist.")
+    if not os.path.exists(content_folder):
+        raise FileNotFoundError(f"Input folder {content_folder} does not exist.")
+    if not os.path.exists(output_folder):
+        raise FileNotFoundError(f"Output folder {output_folder} does not exist.")
 
     content_weight_list = [1.0]
     style_weight_list = [1e4]
     tv_weight_list = [10]
 
-    content_image_filepath_list = sorted(glob.glob(os.path.join(root_folder, "data", "input", "IMG_*")))
-    content_image_filepath_list = [content_image_filepath_list[0]]
+    content_image_filepath_list = sorted(glob.glob(os.path.join(content_folder, "paris.jpg")))
 
-    style_image_filepath_list = sorted(glob.glob(os.path.join(root_folder, "data", "style_transfer", "*.jpeg")))
-
+    style_image_filepath_list = sorted(glob.glob(os.path.join(style_transfer_folder, "paris_00001.jpg")))
 
     for style_weight in style_weight_list:
         for content_weight in content_weight_list:
@@ -298,4 +321,5 @@ def main():
                         print(f"Elapsed time: f{timedelta(seconds=(toc - tic))}")
 
 if __name__ == '__main__':
-    main()
+    args = parse_arguments(sys.argv[1:])
+    main(args)
